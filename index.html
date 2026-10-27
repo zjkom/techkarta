@@ -134,7 +134,7 @@ table.it select,table.it input{border:1px solid var(--line);background:var(--fie
 <body>
 <header class="top">
   <div class="top-in">
-    <div class="brand">Техкарты ЕСТД <small>v3.0</small></div>
+    <div class="brand">Техкарты ЕСТД <small>v3.2</small></div>
     <select class="sel" id="cardSel" aria-label="Выбор детали"></select>
     <button class="btn" id="bNew">Новая</button>
     <button class="btn" id="bDup">Копия</button>
@@ -818,6 +818,14 @@ function analyzeSTL(buf,fname){
     let good=0,tot=0;for(let i=0;i<P.length;i+=9*step){const t=triInfo(P,i,F);if(!t)continue;tot+=t.ar;if(t.t!=="f")good+=t.ar}
     const sc=good/(tot||1);if(!best||sc>best.sc+1e-6)best={sc,F};
   }
+  // уточнить положение оси: точка, ближайшая к нормалям боковых граней (у колёс с нечётным z габарит несимметричен)
+  for(let it=0;it<2;it++){const F0=best.F;let a11=0,a12=0,a22=0,b1=0,b2=0,cnt=0,rmax=0;
+    for(let i=0;i<P.length;i+=9*step){const a=[P[i],P[i+1],P[i+2]],b=[P[i+3],P[i+4],P[i+5]],c=[P[i+6],P[i+7],P[i+8]];const N=V3.cross(V3.sub(b,a),V3.sub(c,a)),ar=Math.hypot(...N)/2;if(ar<1e-9)continue;const n=V3.mul(N,1/(2*ar));
+      if(Math.abs(V3.dot(n,F0.a))>0.1)continue;const ce=V3.sub(V3.mul(V3.add(V3.add(a,b),c),1/3),F0.p0),cu=V3.dot(ce,F0.u),cv=V3.dot(ce,F0.v),rr=Math.hypot(cu,cv);if(rr<1e-6)continue;
+      let nu=V3.dot(n,F0.u),nv=V3.dot(n,F0.v);const nl=Math.hypot(nu,nv);nu/=nl;nv/=nl;if(Math.abs(nu*cv-nv*cu)/rr>0.2)continue;
+      const w=ar;a11+=w*(1-nu*nu);a12+=w*(-nu*nv);a22+=w*(1-nv*nv);b1+=w*((1-nu*nu)*cu-nu*nv*cv);b2+=w*(-nu*nv*cu+(1-nv*nv)*cv);cnt++;if(rr>rmax)rmax=rr}
+    const det=a11*a22-a12*a12;if(cnt<12||Math.abs(det)<1e-9)break;const pu=(b1*a22-a12*b2)/det,pv=(a11*b2-a12*b1)/det;
+    if(Math.hypot(pu,pv)>0.05*rmax)break;best.F=mkFrame(V3.add(F0.p0,V3.add(V3.mul(F0.u,pu),V3.mul(F0.v,pv))),F0.a)}
   const F=best.F,segs=[],cones=[],feat=[];
   for(let i=0;i<P.length;i+=9){const t=triInfo(P,i,F);if(!t)continue;
     if(t.t==="cyl")segs.push({r:t.r,x0:t.x0,x1:t.x1,inner:t.inner,ar:t.ar});
@@ -828,6 +836,8 @@ function analyzeSTL(buf,fname){
   let big=null,ab=0,ai=0;for(const s of segs){if(!big||s.r>big.r+0.01)big=s}
   for(const s of segs)if(big&&Math.abs(s.r-big.r)<0.05){if(s.inner)ai+=s.ar;else ab+=s.ar}
   if(ai>ab){segs.forEach(s=>s.inner=!s.inner);cones.forEach(c=>c.inner=!c.inner)}
+  {let maxR=0;for(let i=0;i<P.length;i+=3){const r=F.loc([P[i],P[i+1],P[i+2]]).r;if(r>maxR)maxR=r}
+    const outR=Math.max(0,...segs.filter(s=>!s.inner).map(s=>s.r),...cones.filter(c=>!c.inner).map(c=>Math.max(c.r0,c.r1)));if(best.sc<0.45||!(outR>=0.97*maxR))return prismFromSTL(P,{src:"STL",unit,fname})}
   return buildModel({segs:mergeSegs(segs),cones:mergeCones(cones),feat,score:best.sc,src:"STL",unit,fname,tris:nt});
 }
 function mergeSegs(segs){
@@ -887,20 +897,21 @@ function analyzeSTEP(txt,fname){
   const faces=[];
   for(const[id,e]of E){if(e.t!=="ADVANCED_FACE"&&e.t!=="FACE_SURFACE")continue;
     const geo=g(e.a[2]);if(!geo)continue;const sense=!(e.a[3]&&e.a[3].en===".F.");
-    const pts=[],circ=[];
+    const pts=[],circ=[];let full=false;
     for(const b of e.a[1]||[]){const be=g(b);if(!be)continue;const lp=g(be.a[1]);if(!lp)continue;
       if(lp.t==="VERTEX_LOOP"){const v=g(lp.a[1]);if(v){const p=pt(v.a[1]);if(p)pts.push(p)}continue}
       for(const oe of lp.a[1]||[]){const o=g(oe);if(!o)continue;const ec=o.t==="ORIENTED_EDGE"?g(o.a[3]):o;if(!ec||ec.t!=="EDGE_CURVE")continue;
         for(const vv of[ec.a[1],ec.a[2]]){const v=g(vv);if(v&&v.t==="VERTEX_POINT"){const p=pt(v.a[1]);if(p)pts.push(p)}}
         let cu=g(ec.a[3]);if(cu&&(cu.t==="SURFACE_CURVE"||cu.t==="SEAM_CURVE"))cu=g(cu.a[1]);
-        if(cu&&cu.t==="CIRCLE"){const A=ax(cu.a[1]);if(A)circ.push({c:A.p,n:A.z,r:cu.a[2]*unit})}}}
-    const f={id,sense,pts,circ,type:geo.t};
+        if(cu&&cu.t==="CIRCLE"){const A=ax(cu.a[1]);if(A)circ.push({c:A.p,n:A.z,r:cu.a[2]*unit});if(ec.a[1]&&ec.a[2]&&ec.a[1].ref===ec.a[2].ref)full=true}}}
+    const f={id,sense,pts,circ,type:geo.t,full};
     if(geo.t==="CYLINDRICAL_SURFACE"||geo.t==="CONICAL_SURFACE"||geo.t==="TOROIDAL_SURFACE"){const A=ax(geo.a[1]);if(!A)continue;f.ax=A;f.r=geo.a[2]*unit;if(geo.t==="CONICAL_SURFACE")f.ang=geo.a[3]}
     else if(geo.t==="PLANE"){const A=ax(geo.a[1]);if(!A)continue;f.ax=A}
     faces.push(f)}
   if(!faces.length)throw new Error("В STEP-файле не найдено граней. Сохраните модель как деталь (твёрдое тело)");
   // ось — по цилиндрам
-  const cyl=faces.filter(f=>f.type==="CYLINDRICAL_SURFACE");if(!cyl.length)throw new Error("В модели нет цилиндрических поверхностей — это не тело вращения");
+  const meta={src:"STEP",unit:uname,fname,name,oboz};
+  const cyl=faces.filter(f=>f.type==="CYLINDRICAL_SURFACE");if(!cyl.length)return prismFromSTEP(faces,meta);
   const groups=[];
   for(const f of cyl){const a=f.ax.z;let ext=1;if(f.pts.length>1){const xs=f.pts.map(p=>V3.dot(V3.sub(p,f.ax.p),a));ext=Math.max(1,Math.max(...xs)-Math.min(...xs))}
     const w=f.r*ext;
@@ -919,9 +930,11 @@ function analyzeSTEP(txt,fname){
     if(f.type==="PLANE"&&Math.abs(Math.abs(V3.dot(f.ax.z,F.a))-1)<1e-3)continue;
     const ff={type:f.type==="PLANE"?"plane":f.type==="CYLINDRICAL_SURFACE"?"cyl":"other",pts:L};
     if(f.type==="PLANE"){const n=f.ax.z;ff.n=n;ff.dist=V3.dot(V3.sub(f.ax.p,F.p0),n);ff.nAx=V3.dot(n,F.a)}
-    if(f.type==="CYLINDRICAL_SURFACE"){ff.r=f.r;ff.perp=Math.abs(V3.dot(f.ax.z,F.a))<0.05;const d=V3.sub(f.ax.p,F.p0),cr=V3.cross(f.ax.z,F.a),cl=Math.hypot(...cr);ff.axDist=cl>1e-6?Math.abs(V3.dot(d,cr))/cl:F.loc(f.ax.p).r;ff.cx=F.loc(f.ax.p).x}
+    if(f.type==="CYLINDRICAL_SURFACE"){ff.r=f.r;ff.perp=Math.abs(V3.dot(f.ax.z,F.a))<0.05;const d=V3.sub(f.ax.p,F.p0),cr=V3.cross(f.ax.z,F.a),cl=Math.hypot(...cr);ff.axDist=cl>1e-6?Math.abs(V3.dot(d,cr))/cl:F.loc(f.ax.p).r;ff.cx=F.loc(f.ax.p).x;ff.par=Math.abs(V3.dot(f.ax.z,F.a))>0.999}
     if(!ff.pts.length&&f.circ.length)ff.pts=f.circ.map(c=>F.loc(c.c));
     if(ff.pts.length)feat.push(ff)}
+  {let maxR=0;faces.forEach(f=>f.pts.forEach(p=>{const r=F.loc(p).r;if(r>maxR)maxR=r}));
+    const outR=Math.max(0,...segs.filter(s=>!s.inner).map(s=>s.r),...cones.filter(c=>!c.inner).map(c=>Math.max(c.r0,c.r1)));if(!(outR>=0.97*maxR))return prismFromSTEP(faces,meta)}
   return buildModel({segs:mergeSegs(segs.map(s=>({...s,ar:1}))),cones:mergeCones(cones),feat,src:"STEP",unit:uname,fname,name,oboz,faces:faces.length});
 }
 
@@ -961,8 +974,8 @@ function buildModel(D){
   const L=xmax-xmin;const Rmax=Math.max(...steps.map(s=>s.R));
   // отверстия по оси
   const bores=[];for(const s of steps){if(s.bore==null||s.bore<0)continue;const l=bores[bores.length-1];
-    if(l&&Math.abs(l.r-s.bore)<0.02&&Math.abs(l.x1-s.x0)<0.1)l.x1=s.x1;else bores.push({r:s.bore,x0:s.x0,x1:s.x1})}
-  for(const s of D.segs)if(s.inner&&!bores.some(b=>Math.abs(b.r-s.r)<0.02&&s.x0>=b.x0-0.1&&s.x1<=b.x1+0.1)&&s.r<Rmax*0.95)bores.push({r:s.r,x0:s.x0,x1:s.x1});
+    if(l&&Math.abs(l.r-s.bore)<0.06&&Math.abs(l.x1-s.x0)<0.1)l.x1=s.x1;else bores.push({r:s.bore,x0:s.x0,x1:s.x1})}
+  for(const s of D.segs){if(!s.inner||s.r>=Rmax*0.95)continue;const b=bores.find(b=>Math.abs(b.r-s.r)<0.06&&s.x0<=b.x1+0.1&&s.x1>=b.x0-0.1);if(b){b.x0=Math.min(b.x0,s.x0);b.x1=Math.max(b.x1,s.x1)}else bores.push({r:s.r,x0:s.x0,x1:s.x1})}
   let center=!!D.center;
   const B=[];for(const b of bores){const atEnd=b.x0<xmin+0.5||b.x1>xmax-0.5,len=b.x1-b.x0;
     if(atEnd&&b.r*2<=Math.max(10,0.2*Rmax*2)&&len<6*b.r&&len<16){center=true;continue}
@@ -982,7 +995,7 @@ function buildModel(D){
 const r1=x=>Math.round(x*10)/10,r2=x=>Math.round(x*100)/100;
 function Rat(S,x){const s=S.find(s=>x>=s.x0-0.01&&x<=s.x1+0.01);return s?s.D/2:Math.max(...S.map(s=>s.D))/2}
 function classify(feat,S,B,xmin,src){
-  const out={keys:[],holes:[],gears:[],flats:[],other:[]};if(!feat.length)return out;
+  const out={keys:[],holes:[],gears:[],flats:[],other:[],axholes:[]};const AXH=[];if(!feat.length)return out;
   // объединение граней/треугольников, касающихся друг друга
   const eps=0.3,cell=new Map(),par=feat.map((_,i)=>i),fnd=i=>par[i]===i?i:(par[i]=fnd(par[i])),uni=(a,b)=>{a=fnd(a);b=fnd(b);if(a!==b)par[a]=b};
   feat.forEach((f,i)=>f.pts.forEach(p=>{const y=p.r*Math.cos(p.th),z=p.r*Math.sin(p.th),k=Math.round(p.x/eps)+","+Math.round(y/eps)+","+Math.round(z/eps);const o=cell.get(k);if(o!=null)uni(o,i);else cell.set(k,i)}));
@@ -1001,19 +1014,16 @@ function classify(feat,S,B,xmin,src){
     const ovl=out.gears.some(g=>c.x0<g.x1-0.5&&c.x1>g.x0+0.5);
     if(ovl&&c.minR>0.5*c.R){used.add(c);continue}
     if((grp.length>=8&&c.minR>0.5*c.R)||(grp.length===1&&c.cover>300&&c.fs.length>=6)){grp.forEach(o=>used.add(o));
-      const Da=2*c.R,Df=2*Math.min(...grp.map(o=>o.minR));let n=grp.length;
-      if(n===1){n=c.fs.filter(f=>f.type!=="plane"&&f.type!=="cyl").length;
-        if(src!=="STEP"){const bins=new Uint8Array(1440);c.pts.forEach(p=>{bins[Math.floor(((p.th+2*Math.PI)%(2*Math.PI))/(2*Math.PI)*1440)%1440]=1});n=0;for(let k=0;k<1440;k++)if(bins[k]&&!bins[(k+1439)%1440])n++}}
-      const mf=(Da-Df)/4.5,zf=mf>0?Da/mf-2:n/2;const z=[n,Math.round(n/2)].reduce((a,b)=>Math.abs(b-zf)<Math.abs(a-zf)?b:a);
-      const MS=[1,1.25,1.5,2,2.5,3,4,5,6,8,10,12];const m=MS.reduce((a,b)=>Math.abs(b-Da/(z+2))<Math.abs(a-Da/(z+2))?b:a);
-      out.gears.push({x0:r2(Math.min(...grp.map(o=>o.x0))),x1:r2(Math.max(...grp.map(o=>o.x1))),b:r2(c.x1-c.x0),Da:r2(Da),Df:r2(Df),z,m,internal:false})}}
+      out.gears.push(crownInfo(grp,c,S,src))}}
   for(const c of CL){if(used.has(c))continue;const{fs,pts,x0,x1,xm,R,cover,minR}=c;
     let sx=0,sy=0;pts.forEach(p=>{sx+=Math.cos(p.th);sy+=Math.sin(p.th)});const tm=Math.atan2(sy,sx);
     const rad=pts.map(p=>p.r*Math.cos(p.th-tm)),tan=pts.map(p=>p.r*Math.sin(p.th-tm));
     const rmin=Math.min(...rad),bw=Math.max(...tan)-Math.min(...tan),step=S.findIndex(s=>xm>=s.x0-0.01&&xm<=s.x1+0.01);
     let l=x1-x0;const bore=B.find(b=>xm>=b.x0&&xm<=b.x1);
     const planes=fs.filter(f=>f.type==="plane"),hc=fs.find(f=>f.type==="cyl"&&f.perp&&f.axDist<0.25*R);
-    if(bore&&minR>=bore.d/2-0.3&&c.maxR<R-0.5){const t2=Math.max(...rad)-bore.d/2;out.keys.push({internal:true,x0:r2(x0),x1:r2(x1),l:r2(l),b:stdB(bw),t:r1(t2),step});continue}
+    const boreR=bore?bore.d/2:0,hpar=fs.find(f=>f.type==="cyl"&&f.par);
+    if(hpar||(src!=="STEP"&&minR>boreR+0.5&&c.maxR<R-0.5&&cover<120)){const d=hpar?2*hpar.r:Math.max(c.maxR-minR,bw);AXH.push({d:r2(d),pcd:r2(hpar?2*hpar.axDist:(minR+c.maxR)),x0:r2(x0),x1:r2(x1),l:r2(l),step});continue}
+    if(bore&&Math.abs(minR-bore.d/2)<0.6&&c.maxR<R-0.5){const t2=Math.max(...rad)-bore.d/2;out.keys.push({internal:true,x0:r2(x0),x1:r2(x1),l:r2(l),b:stdB(bw),t:r1(t2),step});continue}
     const isHole=src==="STEP"?(hc&&!planes.length):(minR<0.45*R);
     if(isHole){const d=hc?2*hc.r:2*Math.max(...pts.map(p=>Math.abs(p.x-xm)));const through=cover>150;
       out.holes.push({d:r2(d),x:r2(xm),through,depth:through?r2(2*R):r2(R-Math.max(minR,0)),step});continue}
@@ -1029,11 +1039,49 @@ function classify(feat,S,B,xmin,src){
     out.keys.push({internal:false,x0:r2(x0),x1:r2(x1),l:r2(l),b:stdB(b),t:r1(t),step});
   }
   if(minor.length)out.other.push(`${minor.length} мелк. элем.`);
+  for(const h of AXH){if(src==="STL")h.d=Math.round(h.d*10)/10;const o=out.axholes.find(o=>Math.abs(o.d-h.d)<0.3&&Math.abs(o.pcd-h.pcd)<0.5&&Math.abs(o.x0-h.x0)<0.3&&Math.abs(o.x1-h.x1)<0.3);
+    if(o)o.n++;else{const st=S[h.step];out.axholes.push({n:1,d:h.d,pcd:h.pcd,x0:h.x0,x1:h.x1,depth:h.l,through:!!st&&h.l>=st.len-0.5,thread:tapOf(h.d),step:h.step})}}
   // половинки одного отверстия (STL) → одно сквозное
   const H=[];for(const h of out.holes){const o=H.find(o=>Math.abs(o.x-h.x)<0.6&&Math.abs(o.d-h.d)<0.6);if(o){o.through=true;o.depth=Math.max(o.depth,h.depth,2*Rat(S,h.x));o.d=Math.max(o.d,h.d)}else H.push({...h})}
   H.forEach(h=>{if(h.through)h.depth=r2(2*Rat(S,h.x));if(src==="STL")h.d=Math.round(h.d*2)/2});out.holes=H;
   return out;
 }
+/* ---------- зубчатый венец / шлицы ---------- */
+const MODS=[1,1.25,1.5,1.75,2,2.25,2.5,2.75,3,3.5,4,4.5,5,5.5,6,7,8,9,10,12];
+const snapM=m=>MODS.reduce((a,b)=>Math.abs(b-m)<Math.abs(a-m)?b:a);
+function gearW(m,z,betaDeg){const a=20*Math.PI/180,inv=Math.tan(a)-a,b=betaDeg*Math.PI/180,at=Math.atan(Math.tan(a)/Math.cos(b)),invt=Math.tan(at)-at,zp=z*invt/inv,zn=Math.max(2,Math.round(zp*20/180+0.5));
+  return{W:m*Math.cos(a)*(Math.PI*(zn-0.5)+zp*inv),zn}}
+function crownInfo(grp,c,S,src){
+  const x0=r2(Math.min(...grp.map(o=>o.x0))),x1=r2(Math.max(...grp.map(o=>o.x1)));
+  const Da=2*c.R,Df=2*Math.min(...grp.map(o=>o.minR));
+  let n=grp.length;
+  if(n===1){n=c.fs.filter(f=>f.type!=="cyl").length;
+    if(src!=="STEP"){const bins=new Uint8Array(1440);c.pts.forEach(p=>{bins[Math.floor(((p.th+2*Math.PI)%(2*Math.PI))/(2*Math.PI)*1440)%1440]=1});n=0;for(let k=0;k<1440;k++)if(bins[k]&&!bins[(k+1439)%1440])n++}}
+  // плоские боковые стороны → прямобочные шлицы
+  const lineRes=P=>{if(P.length<3)return 1;let mx=0,my=0;P.forEach(p=>{mx+=p[0];my+=p[1]});mx/=P.length;my/=P.length;let sxx=0,syy=0,sxy=0;P.forEach(p=>{const a=p[0]-mx,b=p[1]-my;sxx+=a*a;syy+=b*b;sxy+=a*b});
+    const th=0.5*Math.atan2(2*sxy,sxx-syy),nx=-Math.sin(th),ny=Math.cos(th);let r=0;P.forEach(p=>{r=Math.max(r,Math.abs((p[0]-mx)*nx+(p[1]-my)*ny))});return{r,dist:Math.abs(mx*nx+my*ny)}};
+  const flat=o=>src==="STEP"?(o.fs.length&&o.fs.every(f=>f.type==="plane")):(()=>{const L=lineRes(o.pts.map(p=>[p.r*Math.cos(p.th),p.r*Math.sin(p.th)]));return L.r<0.03})();
+  const nFlat=grp.filter(flat).length,spline=grp.length>=4&&nFlat>=0.8*grp.length&&Math.round(n/2)<=20&&Df/Da>=0.75;
+  // наклон зуба: θ = a + k·x
+  const ks=[];grp.forEach(o=>{const P=o.pts;if(P.length<4)return;const t0=P[0].th;const T=P.map(p=>((p.th-t0+3*Math.PI)%(2*Math.PI))-Math.PI);
+    const mx=P.reduce((a,p)=>a+p.x,0)/P.length,mt=T.reduce((a,t)=>a+t,0)/T.length;let sxx=0,sxt=0;P.forEach((p,i)=>{sxx+=(p.x-mx)**2;sxt+=(p.x-mx)*(T[i]-mt)});if(sxx>1)ks.push(sxt/sxx)});
+  ks.sort((a,b)=>a-b);const k=ks.length?ks[Math.floor(ks.length/2)]:0,rp=(Da+Df)/4;
+  let beta=Math.atan(Math.abs(k)*rp)*180/Math.PI;if(beta<1.5)beta=0;beta=Math.round(beta*10)/10;
+  const hand=beta?(k>0?"правое":"левое"):"";
+  const coneStep=S.find(s=>s.cone&&s.x0<x1-0.5&&s.x1>x0+0.5);
+  if(spline){const z=Math.max(4,Math.round(n/2));let bw=0;
+    if(src==="STEP"){const ds=grp.flatMap(o=>o.fs.filter(f=>f.type==="plane").map(f=>Math.abs(f.dist)));if(ds.length)bw=2*ds.reduce((a,b)=>a+b,0)/ds.length}
+    else{const ds=grp.map(o=>lineRes(o.pts.map(p=>[p.r*Math.cos(p.th),p.r*Math.sin(p.th)])).dist);bw=2*ds.reduce((a,b)=>a+b,0)/ds.length}
+    return{kind:"spline",x0,x1,b:r2(x1-x0),Da:r2(Da),Df:r2(Df),z,D:Math.round(Da),d:Math.round(Df),bw:r1(bw),acc:"8",m:0,beta:0,hand:""}}
+  const cb=Math.cos(beta*Math.PI/180);
+  let DfE=Df;if(coneStep){const xe=coneStep.cone.d0>coneStep.cone.d1?x0:x1;const near=grp.flatMap(o=>o.pts).filter(p=>Math.abs(p.x-xe)<0.12*(x1-x0));if(near.length)DfE=2*Math.min(...near.map(p=>p.r))}
+  let m=snapM((Da-DfE)/(coneStep?4.4:4.5)),zf=(Da-2*m)*cb/m;
+  const cand=[n,Math.round(n/2),Math.round(n/3)].filter(v=>v>=6);let z=cand.reduce((a,b)=>Math.abs(b-zf)<Math.abs(a-zf)?b:a,Math.round(zf));
+  if(Math.abs(z-zf)>1.5)z=Math.round(zf);
+  m=snapM(Da/(z/cb+2));
+  return{kind:coneStep?"bevel":beta?"helical":"spur",x0,x1,b:r2(x1-x0),Da:r2(Da),Df:r2(Df),z,m,beta,hand,acc:"8"};
+}
+const GKIND={spur:"цилиндрическое прямозубое",helical:"цилиндрическое косозубое",bevel:"коническое",spline:"шлицы прямобочные"};
 function stdB(b){const T=[2,3,4,5,6,8,10,12,14,16,18,20,22,25,28,32,36,40,45,50];return T.reduce((a,c)=>Math.abs(c-b)<Math.abs(a-b)?c:a)}
 function autoAccuracy(A){
   const S=A.steps,Dm=Math.max(...S.map(s=>s.D));
@@ -1056,6 +1104,7 @@ const MAT={
  "Сталь Ст3сп ГОСТ 380-2005":{ro:7.85,Vr:140,Vf:180,Vd:25,Vm:28,g:"Т15К6",tv:"HB 131"},
  "Сталь 12Х18Н10Т ГОСТ 5632-2014":{ro:7.9,Vr:70,Vf:95,Vd:12,Vm:15,g:"ВК8",tv:"HB 179"},
  "Чугун СЧ20 ГОСТ 1412-85":{ro:7.1,Vr:90,Vf:120,Vd:20,Vm:25,g:"ВК8",tv:"HB 170…241",cast:true},
+ "Сталь 35Л ГОСТ 977-88":{ro:7.83,Vr:100,Vf:140,Vd:20,Vm:22,g:"Т15К6",tv:"HB 137…170",cast:true},
  "Д16Т ГОСТ 4784-2019":{ro:2.78,Vr:250,Vf:350,Vd:60,Vm:80,g:"ВК6",tv:"HB 105"},
  "Бронза БрАЖ9-4 ГОСТ 18175-78":{ro:7.6,Vr:120,Vf:160,Vd:30,Vm:35,g:"ВК6",tv:"HB 100…120"}
 };
@@ -1154,24 +1203,44 @@ function genProcess(A,o){
     fl.forEach(f=>tr.push(T(`Фрезеровать лыску длиной ${nn(f.l)}, выдерживая размер ${nn(Rat(S,(f.x0+f.x1)/2)*2-f.t)}`,`Фреза концевая 20 Р6М5 ГОСТ 17026-71`,{D:"20",L:nn(f.l+20),t:fmt(f.t,1),S:"0,1",V:String(M.Vm)})));
     add({name:"Вертикально-фрезерная",eq:"Вертикально-фрезерный станок 6Р12",prof:"18632",r:"3",tpz:"16",soj:"Эмульсия 5%",fixt:"Тиски станочные с призматическими губками",meas:[...ms].join("\n"),tr,
       setup:ek.map(k=>`Положение фрезы относительно оси детали | 0 | ±0,05 | симметричность паза ${k.b}N9\nГлубина фрезерования | ${fmt(k.t,1)} | +0,2 |`).join("\n")})}
-  // радиальные отверстия
-  if(A.holes.length){const tr=A.holes.map(hh=>T(`Сверлить отверстие Ø${nn(hh.d)} ${hh.through?"насквозь":"на глубину "+nn(hh.depth)}, выдерживая размер ${nn(hh.x)} от торца`,`Сверло спиральное Ø${nn(hh.d)} Р6М5 ГОСТ 10903-77`,{D:nn(hh.d),L:nn(hh.depth+0.3*hh.d),t:fmt(hh.d/2,1),S:hh.d<=10?"0,12":"0,2",V:String(M.Vd)}));
-    add({name:"Вертикально-сверлильная",eq:"Вертикально-сверлильный станок 2Н135",prof:"18355",r:"3",tpz:"10",soj:"Эмульсия 5%",fixt:"Кондуктор накладной с призмой",meas:caliper(L),tr,
-      setup:A.holes.map(hh=>`Положение отверстия Ø${nn(hh.d)} от торца | ${nn(hh.x)} | ±0,2 |`).join("\n")})}
+  // радиальные и осевые отверстия
+  const axTr=[];(A.axholes||[]).forEach(x=>{const n=x.n,ti=x.thread?tapInfo(x.thread):null,dd=ti?ti[0]:x.d,where=x.through?"насквозь":"на глубину "+nn(x.depth);
+    axTr.push(T(`Сверлить ${n>1?n+" отв.":"отверстие"} Ø${nn(dd)} на Ø${nn(x.pcd)} ${where}`,`Сверло спиральное Ø${nn(dd)} Р6М5 ГОСТ 10903-77`,{D:nn(dd),L:nn(x.depth+0.3*dd),t:fmt(dd/2,1),i:n,S:dd<=10?"0,15":"0,22",V:String(M.Vd)}));
+    if(ti){axTr.push(T(`Зенковать фаски ${fmt(ti[2],2)}×45° в ${n} отв.`,"Зенковка коническая 90° Р6М5 ГОСТ 14953-80",{D:nn(dd+2),L:"1",t:"1",i:n,S:"0,1",V:"15"}));axTr.push(T(`Нарезать резьбу ${x.thread}-7H в ${n} отв. ${where}`,`Метчик машинный ${x.thread} ГОСТ 3266-81`,{D:x.thread.replace("М",""),L:nn(x.depth),i:n,S:fmt(ti[2],2),V:"6"}))}});
+  if(A.holes.length||axTr.length){const tr=axTr.concat(A.holes.map(hh=>T(`Сверлить отверстие Ø${nn(hh.d)} ${hh.through?"насквозь":"на глубину "+nn(hh.depth)}, выдерживая размер ${nn(hh.x)} от торца`,`Сверло спиральное Ø${nn(hh.d)} Р6М5 ГОСТ 10903-77`,{D:nn(hh.d),L:nn(hh.depth+0.3*hh.d),t:fmt(hh.d/2,1),S:hh.d<=10?"0,12":"0,2",V:String(M.Vd)})));
+    add({name:"Вертикально-сверлильная",eq:"Вертикально-сверлильный станок 2Н135",prof:"18355",r:"3",tpz:"10",soj:"Эмульсия 5%",fixt:axTr.length?"Кондуктор накладной":"Кондуктор накладной с призмой",meas:caliper(L)+((A.axholes||[]).filter(x=>x.thread).map(x=>`\nКалибр-пробка резьбовая ${x.thread}-7H ГОСТ 17758-72`).join("")),tr,
+      setup:A.holes.map(hh=>`Положение отверстия Ø${nn(hh.d)} от торца | ${nn(hh.x)} | ±0,2 |`).concat((A.axholes||[]).map(x=>`Диаметр окружности центров ${x.n} отв. | ${nn(x.pcd)} | ±0,1 | по кондуктору`)).join("\n")})}
   // протяжка
   const ik=A.keys.filter(k=>k.internal);
   if(ik.length)add({name:"Протяжная",eq:"Горизонтально-протяжной станок 7Б55",prof:"",r:"3",tpz:"12",tsht:"1,5",soj:"Сульфофрезол",fixt:"Приспособление для протягивания шпоночных пазов",meas:ik.map(k=>`Калибр шпоночного паза ${k.b}JS9`).join("\n"),
     tr:ik.map(k=>T(`Протянуть шпоночный паз b=${k.b}JS9, t2=${fmt(k.t,1)} в отверстии`,`Протяжка шпоночная ${k.b} ГОСТ 18217-90`,{i:""}))});
   // зубофрезерная
-  A.gears.forEach(gr=>add({name:"Зубофрезерная",eq:"Зубофрезерный станок 5К324",prof:"12273",r:"4",tpz:"30",soj:"Масло индустриальное И-20А",fixt:kind==="val"?"Центры, поводок":"Оправка зубофрезерная",meas:`Штангензубомер ШЗН-18 ГОСТ 163-79\nНормалемер`,
-    tr:[T(`Фрезеровать зубья m=${fmt(gr.m,2)}, z=${gr.z}, Da=${nn(gr.Da)}, b=${nn(gr.b)}`,`Фреза червячная модульная m${fmt(gr.m,2)} ГОСТ 9324-80`,{D:"80",L:nn((gr.b+30)*gr.z),t:fmt(2.25*gr.m,2),S:"1,5",V:"30"})],
-    setup:`Межосевое расстояние фреза — заготовка | ${nn((gr.Da-4.5*gr.m)/2+40)} | ±0,05 |\nУгол установки фрезы | по углу подъёма витка | |`}));
+  const hard=o.termo==="tvch"||o.termo==="cem";
+  const gTxt=gr=>`m=${fmt(gr.m,2)}, z=${gr.z}${gr.beta?`, β=${fmt(gr.beta,1)}° ${gr.hand}`:""}`;
+  A.gears.forEach(gr=>{
+    if(gr.kind==="spline"){add({name:"Шлицефрезерная",eq:"Шлицефрезерный станок 5350А",prof:"12273",r:"4",tpz:"25",soj:"Масло индустриальное И-20А",fixt:"Центры, поводок",meas:`Калибр-кольцо шлицевое ${gr.z}×${gr.d}×${gr.D} ГОСТ 7951-80\n${caliper(gr.D)}`,
+        tr:[T(`Фрезеровать шлицы ${gr.z}×${gr.d}×${gr.D}, b=${fmt(gr.bw,1)}${gr.acc==="7"?" под шлифование":""}`,`Фреза червячная шлицевая ${gr.z}×${gr.d}×${gr.D} ГОСТ 8027-86`,{D:"80",L:nn((gr.b+30)*gr.z),t:fmt((gr.D-gr.d)/2,2),S:"1,2",V:"25"})],
+        setup:`Межосевое расстояние фреза — заготовка | ${nn(gr.d/2+40)} | ±0,05 |`});return}
+    if(gr.kind==="bevel"){add({name:"Зубострогальная",eq:"Зубострогальный станок 5Т23В",prof:"12273",r:"4",tpz:"40",soj:"Масло индустриальное И-20А",fixt:"Оправка для конических колёс",meas:"Штангензубомер ШЗН-18 ГОСТ 163-79",
+        tr:[T(`Строгать зубья конического колеса ${gTxt(gr)}, внешний делительный диаметр ${nn(gr.m*gr.z)}`,"Резцы зубострогальные ГОСТ 5392-80 — 2 шт.",{i:""})],tsht:fmt(0.25*gr.z*Math.max(1,gr.m/2),1),
+        setup:"Установочный угол резцов | по углу ножки зуба | |\nОбкатка | по таблице наладки | |"});return}
+    const hobT=gr.acc==="7"?"предварительно, под "+(hard?"шлифование":"шевингование"):gr.acc==="8"&&hard?"под шевингование":"окончательно";
+    add({name:"Зубофрезерная",eq:"Зубофрезерный станок 5К324",prof:"12273",r:"4",tpz:"30",soj:"Масло индустриальное И-20А",fixt:kind==="val"?"Центры, поводок":"Оправка зубофрезерная",meas:`Микрометр зубомерный МЗ ${gearW(gr.m,gr.z,gr.beta).W>25?"25-50":"0-25"} ГОСТ 6507-90\nШтангензубомер ШЗН-18 ГОСТ 163-79`,
+      tr:[T(`Фрезеровать зубья ${gTxt(gr)}, Da=${nn(gr.Da)}, b=${nn(gr.b)} ${hobT}`,`Фреза червячная модульная m${fmt(gr.m,2)} класса ${gr.acc==="9"?"B":"A"} ГОСТ 9324-80`,{D:"80",L:nn((gr.b+30)*gr.z),t:fmt(2.25*gr.m,2),S:gr.acc==="9"?"2":"1,5",V:"30"})],
+      setup:`Межосевое расстояние фреза — заготовка | ${nn((gr.Da-4.5*gr.m)/2+40)} | ±0,05 |\nУгол установки фрезы | ${gr.beta?"β ± угол подъёма витка":"по углу подъёма витка"} | |`});
+    add({name:"Зубофаскосъёмная",eq:"Зубофаскосъёмный станок 5Б525",prof:"12273",r:"3",tpz:"10",tsht:fmt(0.02*gr.z+0.5,2),fixt:"Оправка",meas:"",tr:[T(`Снять фаски на торцах зубьев 0,5×45° с двух сторон`,"Фреза пальцевая фасочная",{i:""})]});
+    if((gr.acc==="8"&&hard)||(gr.acc==="7"&&!hard))add({name:"Зубошевинговальная",eq:"Зубошевинговальный станок 5702В",prof:"12273",r:"4",tpz:"20",soj:"Масло индустриальное И-20А",fixt:"Оправка",meas:`Микрометр зубомерный МЗ ${gearW(gr.m,gr.z,gr.beta).W>25?"25-50":"0-25"} ГОСТ 6507-90`,
+      tr:[T(`Шевинговать зубья ${gTxt(gr)}, степень точности ${gr.acc}`,`Шевер дисковый m${fmt(gr.m,2)} ГОСТ 8570-80`,{i:""})],tsht:fmt(0.03*gr.z+1,2)});
+  });
   // термообработка
   if(o.termo&&o.termo!=="none"){const surf=main.filter(s=>s.acc==="7").map(s=>S.indexOf(s)+1).join(", ")||"по чертежу";
     const txt=o.termo==="ul"?(M.ul||"Улучшение по режиму для материала"):o.termo==="tvch"?(M.tvch||"Закалка ТВЧ поверхностей {s}").replace("{s}",surf):(M.cem||"Цементация, закалка, низкий отпуск. HRC 56…62");
     const op=add({vid:"Термическая обработка",name:"Термическая",eq:o.termo==="tvch"?"Установка ТВЧ":"Печь шахтная, ванна закалочная",prof:"19431",r:"3",ksht:"1",op:"10",tsht:"",tv:"",meas:"Твердомер ТШ-2М\nТвердомер ТК-2М",tr:[T(txt,"",{i:""})]});
     if(o.termo==="ul"){/* улучшение — до чистовой обработки */const ti=c.ops.indexOf(op),firstFin=c.ops.findIndex(x=>x.name==="Токарная"&&x!==c.ops.find(y=>y.name==="Токарная"));if(firstFin>0){c.ops.splice(ti,1);c.ops.splice(firstFin,0,op)}}}
   // шлифование
+  A.gears.filter(gr=>gr.acc==="7"&&(hard||gr.kind==="spline")).forEach(gr=>{if(gr.kind==="bevel")return;
+    if(gr.kind==="spline")add({name:"Шлицешлифовальная",eq:"Шлицешлифовальный станок 3451",prof:"19630",r:"4",tpz:"25",soj:"Эмульсия 3%",fixt:"Центры, поводок",meas:`Калибр-кольцо шлицевое ${gr.z}×${gr.d}×${gr.D} ГОСТ 7951-80`,tr:[T(`Шлифовать шлицы ${gr.z}×${gr.d}×${gr.D} по боковым сторонам и d`,"Круг шлифовальный фасонный 24А 40 СМ1 К",{i:""})],tsht:fmt(0.5*gr.z,1)});
+    else add({name:"Зубошлифовальная",eq:"Зубошлифовальный станок 5В833",prof:"19630",r:"5",tpz:"40",soj:"Масло индустриальное И-20А",fixt:kind==="val"?"Центры, поводок":"Оправка",meas:`Микрометр зубомерный МЗ ${gearW(gr.m,gr.z,gr.beta).W>25?"25-50":"0-25"} ГОСТ 6507-90`,tr:[T(`Шлифовать зубья ${gTxt(gr)}, степень точности 7`,"Круг шлифовальный тарельчатый 24А 40 СМ1 К ГОСТ Р 52781-2007",{i:""})],tsht:fmt(0.15*gr.z*Math.max(1,gr.b/30),1)})});
   const gs=main.filter(s=>s.acc==="7");
   if(gs.length&&kind==="val")add({name:"Круглошлифовальная",eq:"Круглошлифовальный станок 3М151",prof:"19630",r:"4",tpz:"14",soj:"Эмульсия 3%",fixt:"Центр упорный ГОСТ 13214-79 — 2 шт., хомутик ГОСТ 2578-70",meas:[...new Set(gs.map(s=>`Скоба ${nn(s.D)}${s.fit||"h7"}`))].join("\n"),
     tr:gs.map(s=>T(`Шлифовать поверхность ${S.indexOf(s)+1} до Ø${nn(s.D)}${s.fit||"h7"}, Ra 0,8`,"Круг шлифовальный 1 600×63×305 24А 40 СМ1 К ГОСТ Р 52781-2007",{D:nn(s.D),L:"0,2",t:"0,2",S:"0,005",V:"30"})),
@@ -1184,8 +1253,11 @@ function genProcess(A,o){
   add({vid:"Слесарная",name:"Слесарная",eq:"Верстак слесарный",prof:"18466",r:"2",tpz:"3",tsht:"1,5",tv:"",fixt:"Тиски слесарные с накладками",tr:[T("Притупить острые кромки, зачистить заусенцы","Напильник 2820-0014 ГОСТ 1465-80\nШабер",{i:""})]});
   const msK=new Set([caliper(Math.max(L,Dmax))]);main.filter(s=>s.acc!=="14").forEach(s=>msK.add(micro(s.D)));gs.forEach(s=>msK.add(`Скоба ${nn(s.D)}${s.fit||"h7"}`));ek.forEach(k=>msK.add(`Калибр-пробка паза ${k.b}N9`));msK.add("Образцы шероховатости ГОСТ 9378-93");
   if(kind==="val")msK.add("Центры контрольные ПБМ-500, индикатор ИЧ-10 ГОСТ 577-68");
+  A.gears.forEach(gr=>{if(gr.kind==="spline")msK.add(`Калибр-кольцо шлицевое ${gr.z}×${gr.d}×${gr.D} ГОСТ 7951-80`);else if(gr.kind!=="bevel")msK.add(`Микрометр зубомерный МЗ ${gearW(gr.m,gr.z,gr.beta).W>25?"25-50":"0-25"} ГОСТ 6507-90`)});
   add({vid:"Контроль",name:"Контрольная",eq:"Стол ОТК",prof:"12968",r:"4",tpz:"",tsht:fmt(2+0.3*S.length,1),tv:"",meas:[...msK].join("\n"),
-    tr:[T("Контролировать размеры, форму и шероховатость поверхностей согласно чертежу","",{i:""})].concat(kind==="val"&&gs.length?[T("Контролировать радиальное биение посадочных поверхностей, не более 0,016","",{i:""})]:[])});
+    tr:[T("Контролировать размеры, форму и шероховатость поверхностей согласно чертежу","",{i:""})].concat(kind==="val"&&gs.length?[T("Контролировать радиальное биение посадочных поверхностей, не более 0,016","",{i:""})]:[],
+      A.gears.filter(gr=>gr.kind==="spur"||gr.kind==="helical").map(gr=>{const w=gearW(gr.m,gr.z,gr.beta);return T(`Контролировать длину общей нормали W=${fmt(w.W,3)} на ${w.zn} зубьях, степень точности ${gr.acc}-B ГОСТ 1643-81`,"",{i:""})}),
+      A.gears.filter(gr=>gr.kind==="spline").map(gr=>T(`Контролировать шлицы ${gr.z}×${gr.d}×${gr.D} комплексным калибром`,"",{i:""})))});
   c.ops.forEach(op=>{op.num=String(c.ops.indexOf(op)*5+5).padStart(3,"0")});
   // эскиз
   c.sk=[{title:"Эскиз детали (по 3D-модели). Номера обрабатываемых поверхностей",note:`Модель: ${A.fname}. Предельные отклонения размеров, шероховатость и материал заданы при импорте — сверить с чертежом. Неуказанные предельные отклонения: валов h14, отверстий H14, остальных ±IT14/2.`,img:drawPart(A,{w:1600,h:700})}];
@@ -1197,7 +1269,7 @@ function genProcess(A,o){
 function drawPart(A,{w=1400,h=600,bg="#fff",ink="#111",acc="#1f5fa8",labels=true}={}){
   const cv=document.createElement("canvas");cv.width=w;cv.height=h;const g=cv.getContext("2d");
   g.fillStyle=bg;g.fillRect(0,0,w,h);
-  const S=A.steps,Dm=Math.max(...S.map(s=>s.D)),pad=110,sc=Math.min((w-2*pad)/A.L,(h-260)/Dm),x0=(w-A.L*sc)/2,cy=h/2-10;
+  const S=A.steps,Dm=Math.max(...S.map(s=>s.D)),pad=110,tblW=labels&&A.gears.length?520:0,sc=Math.min((w-2*pad-tblW)/A.L,(h-260)/Dm),x0=pad+(w-2*pad-tblW-A.L*sc)/2,cy=h/2-10;
   const X=x=>x0+x*sc,Y=r=>cy-r*sc;
   g.lineWidth=2.5;g.strokeStyle=ink;
   // контур
@@ -1218,6 +1290,13 @@ function drawPart(A,{w=1400,h=600,bg="#fff",ink="#111",acc="#1f5fa8",labels=true
   // венец — штрихпунктир делительного диаметра
   A.gears.forEach(gr=>{const d=(gr.Da-2*gr.m)/2*sc;g.setLineDash([18,5,3,5]);g.lineWidth=1;g.beginPath();g.moveTo(X(gr.x0)-8,cy-d);g.lineTo(X(gr.x1)+8,cy-d);g.moveTo(X(gr.x0)-8,cy+d);g.lineTo(X(gr.x1)+8,cy+d);g.stroke();g.setLineDash([])});
   if(!labels)return cv.toDataURL("image/png");
+  // таблица параметров венца
+  if(tblW){const gr=A.gears[0];let rows;
+    if(gr.kind==="spline")rows=[["Шлицы прямобочные","",`${gr.z}×${gr.d}×${gr.D}`],["Стандарт","","ГОСТ 1139-80"],["Число шлицев","z",String(gr.z)],["Внутренний диаметр","d",nn(gr.d)],["Наружный диаметр","D",nn(gr.D)],["Ширина шлица","b",fmt(gr.bw,1)]];
+    else{const w2=gearW(gr.m,gr.z,gr.beta);rows=[[gr.kind==="bevel"?"Внешний окружной модуль":"Модуль","m",fmt(gr.m,2)],["Число зубьев","z",String(gr.z)],["Угол наклона зуба","β",gr.beta?fmt(gr.beta,1)+"°":"0°"],["Направление зуба","",gr.hand||"—"],["Исходный контур","","ГОСТ 13755-2015"],["Коэффициент смещения","x","0"],["Степень точности","",gr.acc+"-B ГОСТ 1643-81"]];
+      if(gr.kind!=="bevel")rows.push(["Длина общей нормали","W",`${fmt(w2.W,3)} (zn=${w2.zn})`],["Делительный диаметр","d",nn(gr.m*gr.z/Math.cos(gr.beta*Math.PI/180))])}
+    const tx=w-tblW-10,ty=40,rh=34,cw=[262,36,212];g.lineWidth=1.5;g.strokeStyle=ink;g.fillStyle=ink;g.font="19px Arial";g.textAlign="left";g.textBaseline="middle";
+    rows.forEach((r,i)=>{let x=tx;r.forEach((t,j)=>{g.strokeRect(x,ty+i*rh,cw[j],rh);g.fillText(t,x+6,ty+i*rh+rh/2+1);x+=cw[j]})})}
   // номера поверхностей и диаметры
   g.font="bold 26px Arial";g.textAlign="center";g.textBaseline="middle";
   S.forEach((s,i)=>{const xm=X((s.x0+s.x1)/2),yt=Y(s.D/2);
@@ -1283,17 +1362,15 @@ function setImp(A,fname){
   const m=/^(\S*[.\d]\S*)\s+(.+)$/.exec(A.oboz||base);
   IMPO.oboz=A.oboz&&A.oboz!==A.name?A.oboz:(m?m[1]:"");IMPO.name=A.name&&A.name!==A.oboz?A.name:(m?m[2]:base);
   if(!IMPO.name)IMPO.name=base;
+  if(A.kind==="prism"){if(A.type==="корпус"){IMPO.mat="Чугун СЧ20 ГОСТ 1412-85";IMPO.termo="stare"}else{IMPO.mat="Сталь 45 ГОСТ 1050-2013";IMPO.termo="none"}}
+  else{if(MAT[IMPO.mat]&&MAT[IMPO.mat].cast&&!/СЧ/.test(IMPO.mat))IMPO.mat="Сталь 45 ГОСТ 1050-2013";if(IMPO.termo==="stare")IMPO.termo="ul"}
 }
-function renderImport(ed){
-  const opt=(arr,v)=>arr.map(([k,l])=>`<option value="${esc(k)}"${k===v?" selected":""}>${esc(l)}</option>`).join("");
-  let html=`<p class="intro">Загрузите модель <b>тела вращения</b>: вал, ось, втулку, шестерню, шкив. Подойдёт <b>STEP</b> (точнее) или <b>STL</b>. В КОМПАС: «Файл → Сохранить как» → STEP. Приложение найдёт поверхности, пазы и отверстия, подберёт заготовку и составит техпроцесс со всеми картами.</p>
-  <div class="drop" id="drop"><b>Перетащите файл сюда</b> или <label class="btn primary" for="m3dIn" style="margin:0">Выбрать файл…</label>
-   <input type="file" id="m3dIn" accept=".step,.stp,.stl" hidden> <button class="btn" data-ia="sample">Пример: вал редуктора</button></div>`;
-  if(IMPBUSY)html+=`<p class="hint">Читаю модель…</p>`;
-  if(IMPERR)html+=`<p class="err">${esc(IMPERR)}</p>`;
-  if(IMP){const A=IMP,thr=A.bores.find(b=>b.through),kind=thr?"втулка / диск с отверстием":(A.L/A.Dmax>=1.6?"вал":"диск");
-    const chips=[`${A.src} · ${A.stats}`,`Тип: ${kind}`,`L ${nn(A.L)} мм`,`Dmax ${nn(A.Dmax)} мм`,`${A.steps.length} пов.`].concat(A.keys.length?[`пазов: ${A.keys.length}`]:[],A.holes.length?[`отверстий: ${A.holes.length}`]:[],A.gears.length?[`венец z=${A.gears[0].z}`]:[],A.bores.length?[`осевых отв.: ${A.bores.length}`]:[],A.chams.length?[`фасок: ${A.chams.length}`]:[],A.center?["центровые отв."]:[],A.other);
-    html+=`<div class="chips">${chips.map(x=>`<span class="chip">${esc(x)}</span>`).join("")}</div>
+const opt=(arr,v)=>arr.map(([k,l])=>`<option value="${esc(k)}"${k===v?" selected":""}>${esc(l)}</option>`).join("");
+const PL_LBL={"14":"Ra 6,3 (черновое)","12":"Ra 3,2","9":"Ra 1,6 (чистовое)","7":"Ra 0,8 (шлифование)"};
+function revBody(A){
+  const thr=A.bores.find(b=>b.through),kind=thr?"втулка / диск с отверстием":(A.L/A.Dmax>=1.6?"вал":"диск");
+  const chips=[`${A.src} · ${A.stats}`,`Тип: ${kind}`,`L ${nn(A.L)} мм`,`Dmax ${nn(A.Dmax)} мм`,`${A.steps.length} пов.`].concat(A.keys.length?[`пазов: ${A.keys.length}`]:[],A.holes.length?[`отверстий: ${A.holes.length}`]:[],A.gears.map(gr=>gr.kind==="spline"?`шлицы ${gr.z}×${gr.d}×${gr.D}`:`${GKIND[gr.kind].replace("цилиндрическое ","")} венец z=${gr.z}, m=${fmt(gr.m,2)}${gr.beta?", β="+fmt(gr.beta,1)+"°":""}`),A.axholes.length?[`отв. на окружности: ${A.axholes.reduce((a,x)=>a+x.n,0)}`]:[],A.bores.length?[`осевых отв.: ${A.bores.length}`]:[],A.chams.length?[`фасок: ${A.chams.length}`]:[],A.center?["центровые отв."]:[],A.other);
+  return`<div class="chips">${chips.map(x=>`<span class="chip">${esc(x)}</span>`).join("")}</div>
     ${A.src==="STL"&&A.score<0.6&&!A.gears.length?`<p class="err">Модель плохо похожа на тело вращения (${Math.round(A.score*100)}% поверхности симметрично оси). Проверьте результат или используйте STEP.</p>`:""}
     <img class="prof" src="${drawPart(A,{w:1400,h:560})}" alt="Профиль детали">
     <fieldset><legend>Поверхности — проверьте точность</legend>
@@ -1303,18 +1380,48 @@ function renderImport(ed){
     ${A.bores.map((b,i)=>`<tr><td>отв.</td><td>отверстие${b.through?" сквозное":""}</td><td class="nu">${nn(b.d)}</td><td class="nu">${nn(b.x1-b.x0)}</td><td><select data-ik="bores.${i}.acc">${opt(Object.entries(ACC_LBL),b.acc)}</select></td><td><input data-ik="bores.${i}.fit" value="${esc(b.fit)}" size="4" placeholder="H12"></td></tr>`).join("")}
     </tbody></table></div>
     <p class="hint">Точность угадана по модели: посадочные места под подшипники и ступени с пазами — IT7 со шлифованием. В STEP/STL нет допусков, сверьте с чертежом.</p></fieldset>
-    ${A.keys.length||A.holes.length||A.gears.length||A.flats.length?`<fieldset><legend>Найденные элементы</legend><div class="grid">
+    ${A.keys.length||A.holes.length||A.gears.length||A.flats.length||A.axholes.length?`<fieldset><legend>Найденные элементы</legend><div class="grid">
       ${A.keys.map((k,i)=>`<label class="f">${k.internal?"Паз в отверстии":"Шпоночный паз"} ${i+1}: b<input data-ik="keys.${i}.b" value="${k.b}"></label><label class="f">t<input data-ik="keys.${i}.t" value="${fmt(k.t,1)}"></label><label class="f">l<input data-ik="keys.${i}.l" value="${nn(k.l)}"></label>`).join("")}
       ${A.holes.map((hh,i)=>`<label class="f">Отверстие ${i+1}: Ø<input data-ik="holes.${i}.d" value="${nn(hh.d)}"></label><label class="f">От торца<input data-ik="holes.${i}.x" value="${nn(hh.x)}"></label>`).join("")}
-      ${A.gears.map((gr,i)=>`<label class="f">Венец ${i+1}: z<input data-ik="gears.${i}.z" value="${gr.z}"></label><label class="f">m<input data-ik="gears.${i}.m" value="${fmt(gr.m,2)}"></label><label class="f">Da<input value="${nn(gr.Da)}" readonly></label>`).join("")}
+      ${A.gears.map((gr,i)=>`<label class="f w2">Венец ${i+1}<select data-ik="gears.${i}.kind">${opt(Object.entries(GKIND),gr.kind)}</select></label>`+(gr.kind==="spline"?
+        `<label class="f">z<input data-ik="gears.${i}.z" value="${gr.z}"></label><label class="f">d<input data-ik="gears.${i}.d" value="${nn(gr.d)}"></label><label class="f">D<input data-ik="gears.${i}.D" value="${nn(gr.D)}"></label><label class="f">b<input data-ik="gears.${i}.bw" value="${fmt(gr.bw,1)}"></label>`:
+        `<label class="f">z<input data-ik="gears.${i}.z" value="${gr.z}"></label><label class="f">m<input data-ik="gears.${i}.m" value="${fmt(gr.m,2)}"></label><label class="f">β, °<input data-ik="gears.${i}.beta" value="${fmt(gr.beta,1)}"></label>`)+
+        `<label class="f">Точность<select data-ik="gears.${i}.acc">${opt([["7","7 (шлиф./шев.)"],["8","8"],["9","9"]],gr.acc)}</select></label><label class="f">Da<input value="${nn(gr.Da)}" readonly></label>`).join("")}
       ${A.flats.map((f,i)=>`<label class="f">Лыска ${i+1}: t<input data-ik="flats.${i}.t" value="${fmt(f.t,1)}"></label>`).join("")}
-    </div></fieldset>`:""}
+      ${A.axholes.map((x,i)=>`<label class="f">${x.n} отв. на окружности: Ø<input data-ik="axholes.${i}.d" value="${nn(x.d)}"></label><label class="f">Ø окружности<input data-ik="axholes.${i}.pcd" value="${nn(x.pcd)}"></label><label class="f">Резьба<input data-ik="axholes.${i}.thread" value="${esc(x.thread)}" placeholder="нет"></label>`).join("")}
+    </div></fieldset>`:""}`;
+}
+function prismBody(A){
+  const nh=A.holes.reduce((a,x)=>a+x.n,0);
+  const chips=[`${A.src} · ${A.stats}`,`Тип: ${A.type}`,`${nn(A.L)}×${nn(A.B)}×${nn(A.H)} мм`,`плоскостей: ${A.faces6.length}`].concat(A.feats.length?[`уступов, пазов, карманов: ${A.feats.length}`]:[],nh?[`отверстий: ${nh}`]:[],A.bosses.length?[`бобышек: ${A.bosses.length}`]:[],A.holes.some(x=>x.half)?["полуотверстия разъёма"]:[]);
+  const HA=x=>[["14","крепёжное (сверлить)"],["12","H12 (сверлить)"],["9","H9 (развернуть)"],["7",x.d>=20?"H7 (расточить)":"H7 (развернуть)"],["T","резьба"]];
+  return`<div class="chips">${chips.map(x=>`<span class="chip">${esc(x)}</span>`).join("")}</div>
+    <img class="prof" src="${drawPrism(A,{w:1400,h:680})}" alt="Эскиз детали">
+    <fieldset><legend>Плоскости</legend><div class="tw"><table class="it"><thead><tr><th>№</th><th>Поверхность</th><th>Площадь</th><th>Обраб.</th><th>Шероховатость</th></tr></thead><tbody>
+    ${A.faces6.map((f,i)=>`<tr><td>${f.no}</td><td>${esc(f.name)}</td><td class="nu">${Math.round(f.frac*100)}%</td><td><input type="checkbox" data-ik="faces6.${i}.on"${f.on?" checked":""}></td><td><select data-ik="faces6.${i}.acc">${opt(Object.entries(PL_LBL),f.acc)}</select></td></tr>`).join("")}
+    </tbody></table></div></fieldset>
+    ${A.feats.length?`<fieldset><legend>Уступы, пазы, карманы</legend><div class="tw"><table class="it"><thead><tr><th>№</th><th>Вид</th><th>Размеры, мм</th><th>Глубина</th><th>Обраб.</th></tr></thead><tbody>
+    ${A.feats.map((f,i)=>`<tr><td>${f.no}</td><td>${f.type}${f.big?" (большая)":""}</td><td class="nu">${f.type==="паз"?`${nn(f.width)} × ${nn(f.length)}`:`${nn(f.a)} × ${nn(f.b)}`}</td><td class="nu">${nn(f.depth)}</td><td><input type="checkbox" data-ik="feats.${i}.on"${f.on?" checked":""}></td></tr>`).join("")}
+    </tbody></table></div><p class="hint">У литых корпусов не все плоскости обрабатываются — снимите галочки с поверхностей, которые остаются литыми.</p></fieldset>`:""}
+    ${A.holes.length?`<fieldset><legend>Отверстия</legend><div class="tw"><table class="it"><thead><tr><th>Кол.</th><th>Ø, мм</th><th>Глубина</th><th>Цековка</th><th>Обработка</th><th>Резьба</th><th>Обраб.</th></tr></thead><tbody>
+    ${A.holes.map((x,i)=>`<tr><td class="nu">${x.n}</td><td class="nu">${nn(x.d)}${x.half?" ½":""}</td><td class="nu">${x.through?"сквозное":nn(x.depth)}</td><td class="nu">${x.cb?`Ø${nn(x.cb.D)}×${nn(x.cb.h)}`:"—"}</td>
+      <td><select data-ik="holes.${i}.acc">${opt(HA(x),x.acc)}</select></td><td><input data-ik="holes.${i}.thread" value="${esc(x.thread)}" size="4" placeholder="М8"></td><td><input type="checkbox" data-ik="holes.${i}.on"${x.on?" checked":""}></td></tr>`).join("")}
+    </tbody></table></div><p class="hint">Резьба определяется по диаметру сверла под резьбу (Ø6,8 → М8, Ø8,5 → М10). Отверстия Ø20 и больше в корпусах считаются посадочными под подшипники (H7, расточка).</p></fieldset>`:""}`;
+}
+function renderImport(ed){
+  let html=`<p class="intro">Загрузите 3D-модель детали в формате <b>STEP</b> (точнее) или <b>STL</b>. В КОМПАС: «Файл → Сохранить как» → STEP. Подходят <b>тела вращения</b> (валы, втулки, шестерни, шкивы, круглые крышки) и <b>корпусные детали</b> (плиты, планки, крышки, корпуса). Приложение найдёт поверхности, пазы и отверстия, подберёт заготовку и составит техпроцесс со всеми картами.</p>
+  <div class="drop" id="drop"><b>Перетащите файл сюда</b> или <label class="btn primary" for="m3dIn" style="margin:0">Выбрать файл…</label>
+   <input type="file" id="m3dIn" accept=".step,.stp,.stl" hidden> <button class="btn" data-ia="sample">Пример: вал</button> <button class="btn" data-ia="sampleP">Пример: плита</button></div>`;
+  if(IMPBUSY)html+=`<p class="hint">Читаю модель…</p>`;
+  if(IMPERR)html+=`<p class="err">${esc(IMPERR)}</p>`;
+  if(IMP){const P=IMP.kind==="prism";
+    html+=(P?prismBody(IMP):revBody(IMP))+`
     <fieldset><legend>Деталь и условия</legend><div class="grid">
       <label class="f w2">Обозначение<input data-io="oboz" value="${esc(IMPO.oboz)}"></label>
       <label class="f w2">Наименование<input data-io="name" value="${esc(IMPO.name)}"></label>
       <label class="f wall">Материал<select data-io="mat">${opt(Object.keys(MAT).map(k=>[k,k]),IMPO.mat)}</select></label>
-      <label class="f w2">Термообработка<select data-io="termo">${opt([["none","без термообработки"],["ul","улучшение"],["tvch","закалка ТВЧ"],["cem","цементация и закалка"]],IMPO.termo)}</select></label>
-      <label class="f w2">Производство<select data-io="prod">${opt([["ed","единичное / мелкосерийное (16К20)"],["ser","серийное (станки с ЧПУ)"]],IMPO.prod)}</select></label>
+      <label class="f w2">Термообработка<select data-io="termo">${opt([["none","без термообработки"],["stare","старение / снятие напряжений"],["ul","улучшение"],["tvch","закалка ТВЧ"],["cem","цементация и закалка"]],IMPO.termo)}</select></label>
+      <label class="f w2">Производство<select data-io="prod">${opt([["ed","единичное / мелкосерийное"],["ser","серийное (станки с ЧПУ)"]],IMPO.prod)}</select></label>
     </div></fieldset>
     <div class="row-actions"><button class="btn primary" data-ia="gen">Создать техпроцесс</button><span class="hint">Создаст новую карту, текущие не изменятся.</span></div>`;
   }
@@ -1326,19 +1433,361 @@ function renderImport(ed){
 function impClick(e){
   const b=e.target.closest("[data-ia]");if(!b)return false;
   if(b.dataset.ia==="sample"){try{const A=analyzeSTL(sampleSTL(),"Вал_редуктора.stl");setImp(A,"КП.ДМ.03.01.002 Вал выходной.stl");IMPERR=""}catch(err){IMPERR=err.message}renderEditor()}
-  if(b.dataset.ia==="gen"&&IMP){try{const c=genProcess(IMP,{...IMPO,org:card().h.org,razr:card().h.razr});S.cards.push(c);S.cur=c.id;S.tab="ops";S.kind="mok";save();renderAll();
+  if(b.dataset.ia==="sampleP"){try{const A=analyzeSTL(samplePlateSTL(),"Плита.stl");setImp(A,"КП.ДМ.05.00.011 Плита.stl");IMPERR=""}catch(err){IMPERR=err.message}renderEditor()}
+  if(b.dataset.ia==="gen"&&IMP){try{const o={...IMPO,org:card().h.org,razr:card().h.razr};const c=IMP.kind==="prism"?genPrism(IMP,o):genProcess(IMP,o);S.cards.push(c);S.cur=c.id;S.tab="ops";S.kind="mok";save();renderAll();
     toast(`Техпроцесс создан: ${c.ops.length} операций. Проверьте точность, режимы и нормы`)}catch(err){toast("Не удалось составить техпроцесс: "+err.message)}}
   return true;
 }
 function impInput(e){
   const t=e.target;if(t.dataset.io!=null){IMPO[t.dataset.io]=t.value;return true}
   if(t.dataset.ik!=null&&IMP){const p=t.dataset.ik.split("."),o=IMP[p[0]][+p[1]],k=p[2];const v=t.value;
-    o[k]=["acc","fit"].includes(k)?v:(k==="b"||k==="z"?(parseInt(v,10)||o[k]):(num(v)??o[k]));
+    o[k]=t.type==="checkbox"?t.checked:["acc","fit","thread","kind"].includes(k)?v:(k==="b"||k==="z"?(parseInt(v,10)||o[k]):(num(v)??o[k]));
     if(k==="acc"&&p[0]==="steps"){if(v==="7"&&!o.fit)o.fit="k6";if(v!=="7"&&o.fit==="k6")o.fit="";if(e.type==="change")renderEditor()}
+    if(k==="kind"&&e.type==="change"){if(v==="spline"){o.D=o.D||Math.round(o.Da);o.d=o.d||Math.round(o.Df);o.bw=o.bw||1}renderEditor()}
+    if(p[0]==="gears"&&k==="beta"&&o.beta>0&&o.kind==="spur")o.kind="helical";
+    if(k==="acc"&&p[0]==="holes"&&v==="T"&&!o.thread&&e.type==="change"){o.thread=tapOf(o.d)||"";renderEditor()}
     if(k==="m"||k==="z"){}return true}
   return false;
 }
-window.__tk={analyzeSTL,analyzeSTEP,genProcess,sampleSTL};
+window.__tk={analyzeSTL,analyzeSTEP,genProcess,sampleSTL,genPrism,samplePlateSTL};
+
+/* ================= Корпусные (призматические) детали ================= */
+const TAP=[[2.5,"М3",0.5],[3.3,"М4",0.7],[4.2,"М5",0.8],[5,"М6",1],[6.8,"М8",1.25],[8.5,"М10",1.5],[10.2,"М12",1.75],[12,"М14",2],[14,"М16",2],[17.5,"М20",2.5],[21,"М24",3]];
+const tapOf=d=>{const t=TAP.find(t=>Math.abs(t[0]-d)<0.06);return t?t[1]:""};
+const tapInfo=M=>TAP.find(t=>t[1]===M);
+const STD_T=[3,4,5,6,8,10,12,14,16,18,20,22,25,28,30,32,36,40,45,50,56,60,63,70,80,90,100,110,120,130,140,150,160];
+const STD_B=[12,14,16,18,20,22,25,28,30,32,36,40,45,50,56,60,63,65,70,75,80,85,90,95,100,105,110,120,125,130,140,150,160,170,180,190,200];
+const FMILL=[40,50,63,80,100,125,160,200,250];
+const EMILL=[3,4,5,6,8,10,12,14,16,18,20,22,25,28,32,36,40];
+const fmD=w=>FMILL.find(d=>d>=1.25*w)||250;
+const emD=w=>{let r=EMILL[0];for(const d of EMILL)if(d<=w+1e-6)r=d;return r};
+function dirCluster(list){const C=[];for(const it of list){const d=V3.norm(it.d);const c=C.find(c=>Math.abs(Math.abs(V3.dot(c.d,d))-1)<2e-3);if(c)c.w+=it.w;else C.push({d,w:it.w})}return C.sort((a,b)=>b.w-a.w)}
+function prismFrame(C){
+  if(!C.length)return[[1,0,0],[0,1,0],[0,0,1]];
+  const d1=C[0].d,c2=C.find(c=>Math.abs(V3.dot(c.d,d1))<3e-3);
+  let d2=c2?c2.d:V3.cross(d1,Math.abs(d1[0])<0.9?[1,0,0]:[0,1,0]);d2=V3.norm(V3.sub(d2,V3.mul(d1,V3.dot(d2,d1))));
+  return[d1,d2,V3.cross(d1,d2)];
+}
+function angCover(angs){if(!angs.length)return 0;const a=angs.map(t=>(t+2*Math.PI)%(2*Math.PI)).sort((x,y)=>x-y);let gap=0;for(let i=0;i<a.length;i++){const d=i?a[i]-a[i-1]:a[0]+2*Math.PI-a[a.length-1];if(d>gap)gap=d}return 360-gap*180/Math.PI}
+function circleFit(P){ // Kasa: P=[[u,v]]
+  let su=0,sv=0;const n=P.length;P.forEach(p=>{su+=p[0];sv+=p[1]});const mu=su/n,mv=sv/n;
+  let Suu=0,Svv=0,Suv=0,Suuu=0,Svvv=0,Suvv=0,Svuu=0;
+  P.forEach(p=>{const u=p[0]-mu,v=p[1]-mv;Suu+=u*u;Svv+=v*v;Suv+=u*v;Suuu+=u*u*u;Svvv+=v*v*v;Suvv+=u*v*v;Svuu+=v*u*u});
+  const a=Suu,b=Suv,c=Suv,d=Svv,e=(Suuu+Suvv)/2,f=(Svvv+Svuu)/2,det=a*d-b*c;if(Math.abs(det)<1e-12)return null;
+  const uc=(e*d-b*f)/det,vc=(a*f-c*e)/det,r=Math.sqrt(uc*uc+vc*vc+(Suu+Svv)/n);
+  let res=0;P.forEach(p=>{res=Math.max(res,Math.abs(Math.hypot(p[0]-mu-uc,p[1]-mv-vc)-r))});
+  return{u:uc+mu,v:vc+mv,r,res};
+}
+const OTH=k=>[(k+1)%3,(k+2)%3];
+
+/* ---------- STL ---------- */
+function prismFromSTL(P,meta){
+  const nt=P.length/9,dl=[];
+  for(let i=0;i<P.length;i+=9){const a=[P[i],P[i+1],P[i+2]],b=[P[i+3],P[i+4],P[i+5]],c=[P[i+6],P[i+7],P[i+8]];const N=V3.cross(V3.sub(b,a),V3.sub(c,a)),ar=Math.hypot(...N)/2;if(ar>1e-9)dl.push({d:N,w:ar})}
+  const E=prismFrame(dirCluster(dl));
+  const co=p=>[V3.dot(p,E[0]),V3.dot(p,E[1]),V3.dot(p,E[2])];
+  const pts=[],planeT=[],cylT=[],oth=[];let vol=0;
+  for(let i=0;i<P.length;i+=9){const p=[[P[i],P[i+1],P[i+2]],[P[i+3],P[i+4],P[i+5]],[P[i+6],P[i+7],P[i+8]]];
+    vol+=V3.dot(p[0],V3.cross(p[1],p[2]))/6;
+    const N=V3.cross(V3.sub(p[1],p[0]),V3.sub(p[2],p[0])),ar=Math.hypot(...N)/2;if(ar<1e-9)continue;const n=V3.mul(N,1/(2*ar)),q=p.map(co);pts.push(...q);
+    const nd=[0,1,2].map(k=>V3.dot(n,E[k]));
+    const kp=nd.findIndex(x=>Math.abs(x)>0.99995);
+    if(kp>=0){planeT.push({k:kp,s:Math.sign(nd[kp]),z:(q[0][kp]+q[1][kp]+q[2][kp])/3,q,ar});continue}
+    const kc=nd.findIndex(x=>Math.abs(x)<0.02);
+    if(kc>=0){cylT.push({k:kc,q,n:nd,ar});continue}
+    oth.push({q})}
+  // ориентация нормалей: грань на максимуме по оси должна смотреть наружу
+  let sgn=0;for(const t of planeT){sgn+=t.s*(t.z-0)}; // запасной признак не нужен — проверим по объёму
+  const flip=vol<0;if(flip){planeT.forEach(t=>t.s=-t.s);cylT.forEach(t=>t.n=t.n.map(x=>-x))}
+  // плоские участки: группировка по уровню и связности
+  const vkey=v=>v.map(x=>Math.round(x*50)).join(",");
+  const planes=[];const grpP=new Map();
+  for(const t of planeT){const key=t.k+"|"+t.s+"|"+Math.round(t.z*20);if(!grpP.has(key))grpP.set(key,[]);grpP.get(key).push(t)}
+  for(const list of grpP.values()){const par=list.map((_,i)=>i),fnd=i=>par[i]===i?i:(par[i]=fnd(par[i])),own=new Map();
+    list.forEach((t,i)=>t.q.forEach(v=>{const k=vkey(v);if(own.has(k)){const a=fnd(own.get(k)),b=fnd(i);if(a!==b)par[a]=b}else own.set(k,i)}));
+    const comp=new Map();list.forEach((t,i)=>{const r=fnd(i);if(!comp.has(r))comp.set(r,[]);comp.get(r).push(t)});
+    for(const c of comp.values())planes.push({k:c[0].k,s:c[0].s,z:c.reduce((a,t)=>a+t.z,0)/c.length,pts:c.flatMap(t=>t.q),area:c.reduce((a,t)=>a+t.ar,0)})}
+  // цилиндрические участки
+  const cyls=[];const grpC=[0,1,2].map(k=>cylT.filter(t=>t.k===k));
+  grpC.forEach((list,k)=>{if(!list.length)return;const par=list.map((_,i)=>i),fnd=i=>par[i]===i?i:(par[i]=fnd(par[i])),own=new Map();
+    list.forEach((t,i)=>t.q.forEach(v=>{const kk=vkey(v);if(own.has(kk)){const a=fnd(own.get(kk)),b=fnd(i);if(a!==b)par[a]=b}else own.set(kk,i)}));
+    const comp=new Map();list.forEach((t,i)=>{const r=fnd(i);if(!comp.has(r))comp.set(r,[]);comp.get(r).push(t)});
+    const[a,b]=OTH(k);
+    for(const c of comp.values()){const P2=c.flatMap(t=>t.q.map(v=>[v[a],v[b]]));if(P2.length<6)continue;const fit=circleFit(P2);if(!fit||fit.res>Math.max(0.05,0.02*fit.r))continue;
+      let s=0;c.forEach(t=>{const cu=(t.q[0][a]+t.q[1][a]+t.q[2][a])/3-fit.u,cv=(t.q[0][b]+t.q[1][b]+t.q[2][b])/3-fit.v;s+=(t.n[a]*cu+t.n[b]*cv)*t.ar});
+      const zs=c.flatMap(t=>t.q.map(v=>v[k]));
+      cyls.push({k,u:fit.u,v:fit.v,r:fit.r,z0:Math.min(...zs),z1:Math.max(...zs),inner:s<0,cover:angCover(P2.map(p=>Math.atan2(p[1]-fit.v,p[0]-fit.u)))})}});
+  return buildPrism({E,pts,planes,cyls,others:oth.map(o=>({pts:o.q})),vol:Math.abs(vol),...meta,stats:`${nt} треуг.`});
+}
+
+/* ---------- STEP ---------- */
+function prismFromSTEP(faces,meta){
+  const dl=[];
+  for(const f of faces){if(!f.ax)continue;
+    if(f.type==="PLANE"){let w=1;if(f.pts.length>1){const xs=f.pts.map(p=>p[0]),ys=f.pts.map(p=>p[1]),zs=f.pts.map(p=>p[2]);w=1+(Math.max(...xs)-Math.min(...xs))**2+(Math.max(...ys)-Math.min(...ys))**2+(Math.max(...zs)-Math.min(...zs))**2}dl.push({d:f.ax.z,w})}
+    if(f.type==="CYLINDRICAL_SURFACE")dl.push({d:f.ax.z,w:f.r*5})}
+  const E=prismFrame(dirCluster(dl)),co=p=>[V3.dot(p,E[0]),V3.dot(p,E[1]),V3.dot(p,E[2])];
+  const pts=[],planes=[],cyls=[],others=[];
+  for(const f of faces){const q=f.pts.map(co);pts.push(...q);
+    for(const c of f.circ){const cc=co(c.c);const n=[0,1,2].map(k=>Math.abs(V3.dot(c.n,E[k])));const k=n.findIndex(x=>x>0.999);if(k>=0){const[a,b]=OTH(k);pts.push([...cc].map((x,i)=>i===a?x+c.r:x),[...cc].map((x,i)=>i===a?x-c.r:x),[...cc].map((x,i)=>i===b?x+c.r:x),[...cc].map((x,i)=>i===b?x-c.r:x))}}
+    if(f.type==="PLANE"&&f.ax){const n=f.sense?f.ax.z:V3.mul(f.ax.z,-1),nd=[0,1,2].map(k=>V3.dot(n,E[k])),k=nd.findIndex(x=>Math.abs(x)>0.999);if(k<0)continue;
+      const z=V3.dot(f.ax.p,E[k]),[a,b]=OTH(k),us=q.map(p=>p[a]).concat(f.circ.map(c=>co(c.c)[a])),vs=q.map(p=>p[b]).concat(f.circ.map(c=>co(c.c)[b]));
+      const ext=us.length?(Math.max(...us)-Math.min(...us))*(Math.max(...vs)-Math.min(...vs)):0;
+      planes.push({k,s:Math.sign(nd[k]),z,pts:q.length?q:f.circ.map(c=>co(c.c)),area:ext,circ:f.circ.map(c=>({c:co(c.c),r:c.r}))});continue}
+    if(f.type==="CYLINDRICAL_SURFACE"&&f.ax){const nd=[0,1,2].map(k=>Math.abs(V3.dot(f.ax.z,E[k]))),k=nd.findIndex(x=>x>0.999);if(k<0)continue;
+      const cc=co(f.ax.p),[a,b]=OTH(k),zs=q.map(p=>p[k]).concat(f.circ.map(c=>co(c.c)[k]));if(zs.length<2)continue;
+      const cover=f.full?360:angCover(q.map(p=>Math.atan2(p[b]-cc[b],p[a]-cc[a])));
+      cyls.push({k,u:cc[a],v:cc[b],r:f.r,z0:Math.min(...zs),z1:Math.max(...zs),inner:!f.sense,cover});continue}
+    others.push({pts:q.concat(f.circ.map(c=>co(c.c))),cone:f.type==="CONICAL_SURFACE"})}
+  return buildPrism({E,pts,planes,cyls,others,vol:null,...meta,stats:`${faces.length} граней`});
+}
+
+/* ---------- элементы ---------- */
+function buildPrism(D){
+  if(!D.pts.length)throw new Error("В модели не найдено геометрии");
+  {const e0=[0,1,2].map(k=>Math.max(...D.pts.map(p=>p[k]))-Math.min(...D.pts.map(p=>p[k])));const kH=[0,1,2].sort((a,b)=>e0[a]-e0[b])[0];
+    const lo=Math.min(...D.pts.map(p=>p[kH])),hi=Math.max(...D.pts.map(p=>p[kH]));let sc=0;
+    D.planes.forEach(p=>{if(p.k===kH&&p.z>lo+0.15&&p.z<hi-0.15)sc+=p.s*p.area});
+    D.cyls.forEach(c=>{if(c.k===kH||!c.inner||c.cover>=300)return;const[a,b]=OTH(c.k),z=a===kH?c.u:b===kH?c.v:null;if(z==null)return;if(Math.abs(z-lo)<0.5)sc-=1e7;if(Math.abs(z-hi)<0.5)sc+=1e7});
+    if(sc<0){const f=q=>{const r=q.slice();r[kH]=-r[kH];return r};D.pts=D.pts.map(f);
+      D.planes=D.planes.map(p=>({...p,z:p.k===kH?-p.z:p.z,s:p.k===kH?-p.s:p.s,pts:p.pts.map(f)}));
+      D.cyls=D.cyls.map(c=>{if(c.k===kH)return{...c,z0:-c.z1,z1:-c.z0};const[a,b]=OTH(c.k);return{...c,u:a===kH?-c.u:c.u,v:b===kH?-c.v:c.v}});
+      D.others=D.others.map(o=>({...o,pts:o.pts.map(f)}))}}
+  const mn=[0,1,2].map(k=>Math.min(...D.pts.map(p=>p[k]))),mx=[0,1,2].map(k=>Math.max(...D.pts.map(p=>p[k]))),ext=[0,1,2].map(k=>mx[k]-mn[k]);
+  const ord=[0,1,2].sort((a,b)=>ext[b]-ext[a]);const[iL,iB,iH]=ord;
+  const rel=(k,z)=>z-mn[k];
+  const AX={[iL]:"X",[iB]:"Y",[iH]:"Z"};
+  // отверстия: группы соосных цилиндров
+  const H=[],bosses=[];
+  const cy=D.cyls.map(c=>({...c,z0:rel(c.k,c.z0),z1:rel(c.k,c.z1),u:rel(OTH(c.k)[0],c.u),v:rel(OTH(c.k)[1],c.v)}));
+  const groups=[];
+  for(const c of cy){if(c.z1-c.z0<0.05)continue;const g=groups.find(g=>g.k===c.k&&g.inner===c.inner&&Math.hypot(g.u-c.u,g.v-c.v)<0.06);if(g)g.l.push(c);else groups.push({k:c.k,u:c.u,v:c.v,inner:c.inner,l:[c]})}
+  // объединить половинки (одинаковый радиус и участок)
+  for(const g of groups){const m=[];for(const c of g.l){const o=m.find(o=>Math.abs(o.r-c.r)<0.03&&c.z0<o.z1+0.05&&c.z1>o.z0-0.05);if(o){o.z0=Math.min(o.z0,c.z0);o.z1=Math.max(o.z1,c.z1);o.cover=Math.min(360,o.cover+c.cover)}else m.push({...c})}g.l=m.sort((a,b)=>a.z0-b.z0)}
+  const pl=D.planes.map(p=>({...p,zr:rel(p.k,p.z),P:p.pts.map(q=>[q[0]-mn[0],q[1]-mn[1],q[2]-mn[2]])}));
+  const oth=D.others.map(o=>({...o,P:o.pts.map(q=>[q[0]-mn[0],q[1]-mn[1],q[2]-mn[2]])}));
+  const usedPl=new Set();
+  for(const g of groups){
+    const[a,b]=OTH(g.k);
+    if(!g.inner){g.l.forEach(c=>{if(c.cover>=170&&c.r>2)bosses.push({k:g.k,d:r2(2*c.r),u:g.u,v:g.v,z0:c.z0,z1:c.z1})});continue}
+    const segs=g.l.filter(c=>c.cover>=170);if(!segs.length)continue;
+    const half=segs.every(c=>c.cover<300);
+    const z0=Math.min(...segs.map(c=>c.z0)),z1=Math.max(...segs.map(c=>c.z1)),main=segs.reduce((a,c)=>c.r<a.r?c:a);
+    const inCirc=(P,r)=>P.length&&P.every(q=>Math.hypot(q[a]-g.u,q[b]-g.v)<=r+0.15);
+    const capAt=(z,r,dir)=>{let hit=false;pl.forEach(p=>{if(p.k===g.k&&Math.abs(p.zr-z)<0.15&&inCirc(p.P,r)){hit=true;usedPl.add(p)}});
+      oth.forEach(o=>{if(o.P.length&&inCirc(o.P,r)&&o.P.every(q=>dir>0?q[g.k]>=z-0.15&&q[g.k]<=z+r*1.2:q[g.k]<=z+0.15&&q[g.k]>=z-r*1.2))hit=true});return hit};
+    // ступени по краям — цековки
+    const atHi=segs.filter(c=>c.r>main.r+0.05&&Math.abs(c.z1-z1)<0.1),atLo=segs.filter(c=>c.r>main.r+0.05&&Math.abs(c.z0-z0)<0.1);
+    segs.filter(c=>c.r>main.r+0.05).forEach(c=>pl.forEach(p=>{if(p.k===g.k&&inCirc(p.P,c.r)&&(Math.abs(p.zr-c.z0)<0.15||Math.abs(p.zr-c.z1)<0.15))usedPl.add(p)}));
+    const mz0=atLo.length?Math.max(...atLo.map(c=>c.z1)):z0,mz1=atHi.length?Math.min(...atHi.map(c=>c.z0)):z1;
+    const closedLo=capAt(z0,(atLo[0]||main).r,-1),closedHi=capAt(z1,(atHi[0]||main).r,1);
+    const through=!closedLo&&!closedHi;
+    const entry=through?(atLo.length&&!atHi.length?-1:1):(closedLo?1:-1);
+    const cbS=entry>0?atHi[0]:atLo[0];
+    const d=r2(2*main.r),depth=r2(through?z1-z0:(mz1-mz0)),thr=tapOf(d);
+    H.push({k:g.k,ax:AX[g.k],u:g.u,v:g.v,z0,z1,d,through,depth,entry,half,cb:cbS?{D:r2(2*cbS.r),h:r2(cbS.z1-cbS.z0)}:null,thread:thr});
+  }
+  // группы одинаковых отверстий
+  const HG=[];for(const h of H){const o=HG.find(o=>o.k===h.k&&o.entry===h.entry&&o.d===h.d&&o.through===h.through&&Math.abs(o.depth-h.depth)<0.1&&JSON.stringify(o.cb)===JSON.stringify(h.cb)&&o.half===h.half);if(o){o.n++;o.pos.push(h)}else HG.push({...h,n:1,pos:[h]})}
+  const housing=H.some(h=>h.half)||(ext[iH]>0.35*ext[iB]&&H.some(h=>h.d>=25))||bosses.length>=2;
+  HG.forEach((g,i)=>{g.id=i;g.acc=g.thread?"T":(g.d>=20&&(housing||g.half))?"7":"14";g.on=true});
+  // плоскости граней габарита
+  const NM={[iH]:["Низ (основание)","Верх"],[iL]:["Торец левый","Торец правый"],[iB]:["Бок передний","Бок задний"]};
+  const faces6=[];[iH,iL,iB].forEach(k=>[-1,1].forEach(s=>{const lev=s<0?0:ext[k];const ps=pl.filter(p=>p.k===k&&p.s===s&&Math.abs(p.zr-lev)<0.15);
+    const[a,b]=OTH(k),fa=ext[a]*ext[b];const ar=ps.reduce((x,p)=>x+p.area,0);ps.forEach(p=>usedPl.add(p));
+    if(ps.length)faces6.push({k,s,ax:AX[k],name:NM[k][s<0?0:1],area:ar,frac:Math.min(1,ar/(fa||1)),on:true,acc:k===iH?"12":"14"})}));
+  if(housing)faces6.forEach(f=>{f.on=f.k===iH||HG.some(g=>g.k===f.k&&g.d>=20);if(f.k===iH&&f.s>0)f.acc="9"});
+  // элементы на промежуточных уровнях
+  const feats=[];
+  for(const p of pl){if(usedPl.has(p)||p.P.length<3||p.k!==iH)continue;const[a,b]=OTH(p.k);
+    const us=p.P.map(q=>q[a]),vs=p.P.map(q=>q[b]),u0=Math.min(...us),u1=Math.max(...us),v0=Math.min(...vs),v1=Math.max(...vs);
+    const w=u1-u0,l=v1-v0;if(w*l<1||p.area<1)continue;
+    const depth=p.s>0?ext[p.k]-p.zr:p.zr;if(depth<0.1)continue;
+    const t=[u0<0.15,u1>ext[a]-0.15,v0<0.15,v1>ext[b]-0.15],n=t.filter(Boolean).length;
+    let type;
+    if(n===4)type="плоскость";else if(t[0]&&t[1]&&!t[2]&&!t[3])type="паз";else if(t[2]&&t[3]&&!t[0]&&!t[1])type="паз";
+    else if(n===0)type="карман";else type="уступ";
+    const along=type==="паз"?(t[0]&&t[1]?a:b):null;
+    feats.push({k:p.k,s:p.s,ax:AX[p.k],type,depth:r2(depth),a:r2(w),b:r2(l),A:a,B:b,u0,u1,v0,v1,area:p.area,width:type==="паз"?r2(along===a?l:w):null,length:type==="паз"?r2(along===a?w:l):null,on:true,acc:"14",big:p.area>0.3*ext[a]*ext[b]})}
+  // объём
+  let vol=D.vol;if(!vol){vol=ext[0]*ext[1]*ext[2];feats.forEach(f=>{vol-=f.area*f.depth});H.forEach(h=>{vol-=Math.PI*h.d*h.d/4*h.depth*(h.half?0.5:1)})}
+  const A={kind:"prism",src:D.src,fname:D.fname,unit:D.unit,stats:D.stats,name:D.name||"",oboz:D.oboz||"",
+    type:housing?"корпус":"плита",L:r2(ext[iL]),B:r2(ext[iB]),H:r2(ext[iH]),iL,iB,iH,ext,faces6,feats,holes:HG,bosses,vol:Math.max(vol,0),volExact:!!D.vol};
+  // нумерация поверхностей
+  let no=1;A.faces6.forEach(f=>f.no=no++);A.feats.forEach(f=>f.no=no++);
+  return A;
+}
+const AXN={X:"длине",Y:"ширине",Z:"высоте"};
+function holeTxt(g){return`${g.n>1?g.n+" отв.":"отверстие"} Ø${nn(g.d)}${g.half?" (полуотверстие разъёма)":""} ${g.through?"насквозь":"на глубину "+nn(g.depth)}`}
+
+/* ---------- техпроцесс для корпусных ---------- */
+function genPrism(A,o){
+  const M=MAT[o.mat]||MAT["Сталь 45 ГОСТ 1050-2013"],g=M.g,serial=o.prod==="ser";
+  const{L,B,H}=A,big=Math.max(L,B);
+  const c=blankCard(),h=c.h;
+  // заготовка
+  let zag,Lz,Bz,Hz,cut="";
+  if(M.cast){Lz=Math.ceil(L+6);Bz=Math.ceil(B+6);Hz=Math.ceil(H+6);zag=`Отливка ${Lz}×${Bz}×${Hz} ГОСТ Р 53464-2009`}
+  else if(/Д16Т/.test(o.mat)){Hz=STD_T.find(t=>t>=H+2)||Math.ceil(H+4);Lz=Math.ceil(L+6);Bz=Math.ceil(B+6);zag=`Плита ${Hz} Д16Т ГОСТ 17232-99`;cut="saw"}
+  else if(H+2>60){Lz=Math.ceil(L+8);Bz=Math.ceil(B+8);Hz=Math.ceil(H+8);zag=`Поковка ${Lz}×${Bz}×${Hz} ГОСТ 7505-89`}
+  else{Hz=STD_T.find(t=>t>=H+2)||Math.ceil(H+4);const bw=STD_B.find(x=>x>=B+3);
+    if(Math.abs(B-H)<1&&B<=200){Hz=Bz=STD_T.find(t=>t>=B+3)||Math.ceil(B+6);Lz=Math.ceil(L+6);zag=`Квадрат ${Hz} ГОСТ 2591-2006`;cut="saw"}
+    else if(bw&&bw<=200){Bz=bw;Lz=Math.ceil(L+6);zag=`Полоса ${Hz}×${Bz} ГОСТ 103-2006`;cut="saw"}else{Lz=Math.ceil(L+6);Bz=Math.ceil(B+6);zag=`Лист ${Hz} ГОСТ 19903-2015`;cut=Hz<=6?"shear":"plasma"}}
+  const md=A.vol*M.ro/1e6,mz=Lz*Bz*Hz*M.ro/1e6,nr=cut==="saw"?mz*(Lz+3)/Lz:mz*1.1;
+  Object.assign(h,{oboz:o.oboz,name:o.name,org:o.org||"",mat:o.mat,ev:"кг",md:fmt(md,2),en:"1",nrash:fmt(nr,2),mz:fmt(mz,2),zagProf:zag,kd:"1",tv:M.tv,razr:o.razr||"",date:new Date().toLocaleDateString("ru-RU")});
+  c.ops=[];
+  const T=(text,tools,m={})=>Object.assign(blankTr(),{text,tools:tools||""},m,{i:m.i!=null?String(m.i):"1"});
+  const add=op=>{const x=Object.assign(blankOp(),{cex:"01",uch:"1",rm:"1",kr:"1",koid:"1",en:"1",op:"1",ksht:"1",open:false},op);if(x.tv==null||x.tv==="")x.tv=fmt(0.5+0.2*x.tr.length,2);c.ops.push(x);return x};
+  const cal=caliper(big);
+  const mill=serial?"Многоцелевой станок с ЧПУ ИР500ПМФ4":big>630||B>320?"Продольно-фрезерный станок 6Г608":"Вертикально-фрезерный станок 6Р12";
+  const fixtM=A.type==="корпус"?"Приспособление фрезерное специальное":"Тиски станочные поворотные ГОСТ 16518-96";
+  // 005
+  if(cut==="saw")add({vid:"Заготовительная",name:"Отрезная",eq:"Ленточнопильный станок",prof:"18873",r:"2",tpz:"5",tsht:fmt(0.6+0.015*Bz*Hz/10,2),tv:"0,5",fixt:"Тиски станочные",meas:caliper(Lz),tr:[T(`Отрезать заготовку, выдерживая размер ${Lz}±1`,"Полотно ленточное биметаллическое",{i:""})],setup:`Упор длины заготовки | ${Lz} | ±1 |`});
+  if(cut==="plasma")add({vid:"Заготовительная",name:"Резка термическая",eq:"Машина плазменной резки с ЧПУ",prof:"19756",r:"3",tpz:"10",tsht:fmt(1+0.004*(Lz+Bz)*2,2),tv:"0,5",meas:caliper(Math.max(Lz,Bz)),tr:[T(`Вырезать заготовку ${Lz}×${Bz} из листа ${Hz}`,"Плазмотрон",{i:""})]});
+  if(cut==="shear")add({vid:"Заготовительная",name:"Отрезная",eq:"Ножницы гильотинные НД3316Г",prof:"18873",r:"2",tpz:"5",tsht:"0,8",tv:"0,3",meas:caliper(Math.max(Lz,Bz)),tr:[T(`Отрезать заготовку ${Lz}×${Bz} из листа ${Hz}`,"Ножи гильотинные",{i:""})]});
+  // фрезерование плоскостей
+  const ext=A.ext,OT=k=>OTH(k);
+  const face=f=>{const[a,b]=OT(f.k);const w=Math.min(ext[a],ext[b]),len=Math.max(ext[a],ext[b]);return{w,len}};
+  const allowZ=M.cast?3:(Hz-H)/2,allowSide=cut==="saw"&&false?0:3;
+  const ftr=[],setup=[];let letter=0;const LT="АБВГДЕ";
+  const byAxis=k=>A.faces6.filter(f=>f.on&&f.k===k);
+  const plan=[[A.iH,"H"],[A.iL,"L"],[A.iB,"B"]];
+  plan.forEach(([k,lbl])=>{const fs=byAxis(k);if(!fs.length)return;
+    const skipRolled=false;
+    fs.sort((x,y)=>x.s-y.s).forEach((f,j)=>{if(skipRolled)return;const{w,len}=face(f),D=fmD(w),i=Math.max(1,Math.ceil(w/(0.75*D))),al=k===A.iH?allowZ:allowSide,pz=Math.max(1,Math.ceil(al/3));
+      const dim=k===A.iH?H:k===A.iL?L:B;
+      ftr.push(T(`Установ ${LT[letter++]}. Установить${letter>1?", переустановить":""} заготовку`,""));
+      ftr.push(T(`Фрезеровать плоскость ${f.no} — ${f.name.toLowerCase()}${j===0&&fs.length>1?" как чисто":`, выдерживая размер ${nn(dim)}${f.acc==="14"?"-"+fmt(it14(dim),2):""}`}`,`Фреза торцевая ${D} ${g} ГОСТ 26595-85`,{D:String(D),L:nn(len+D),t:fmt(al/pz,2),i:i*pz,S:"1,2",V:String(Math.round(M.Vr*1.1))}));
+      if(f.acc!=="14")ftr.push(T(`Фрезеровать плоскость ${f.no} окончательно, Ra ${RA[f.acc==="7"?"9":f.acc]}${f.acc==="7"?" (припуск 0,2 под шлифование)":""}`,`Фреза торцевая ${D} ${g} ГОСТ 26595-85`,{D:String(D),L:nn(len+D),t:"0,5",i,S:"0,6",V:String(Math.round(M.Vf*1.1))}));});
+    setup.push(`Размер ${lbl} от стола до фрезы | ${nn(k===A.iH?H:k===A.iL?L:B)} | ${fmt(it14(k===A.iH?H:k===A.iL?L:B),2)} | по пробному проходу`)});
+  if(ftr.length)add({name:big>630||B>320?"Продольно-фрезерная":"Вертикально-фрезерная",eq:mill,prof:"18632",r:"3",tpz:"20",soj:M.cast?"":"Эмульсия 5%",fixt:fixtM,meas:cal,tr:ftr,setup:setup.join("\n"),tv:fmt(0.8*letter+0.2*ftr.length,2)});
+  // термообработка (старение) — после черновой
+  const termo=()=>{if(!o.termo||o.termo==="none")return;
+    const txt=o.termo==="stare"?(M.cast?"Искусственное старение: нагрев до 550 °C, выдержка 4…6 ч, охлаждение с печью":"Отжиг для снятия внутренних напряжений: нагрев до 600 °C, выдержка 2 ч, охлаждение с печью"):o.termo==="ul"?(M.ul||"Улучшение по режиму для материала"):o.termo==="tvch"?(M.tvch||"Закалка ТВЧ").replace("{s}","по чертежу"):(M.cem||"Цементация, закалка, низкий отпуск");
+    add({vid:"Термическая обработка",name:"Термическая",eq:"Печь камерная",prof:"19431",r:"3",op:"10",tsht:"",tv:"",meas:"Твердомер ТШ-2М",tr:[T(txt,"",{i:""})]})};
+  if(o.termo==="stare")termo();
+  // элементы
+  const fe=A.feats.filter(f=>f.on);
+  if(fe.length){const tr=[],ms=new Set([cal,"Штангенглубиномер ШГ-160-0,05 ГОСТ 162-90"]);
+    fe.forEach(f=>{const lab=`${f.no}`;
+      if(f.type==="плоскость"){const D=fmD(Math.min(f.a,f.b));tr.push(T(`Фрезеровать плоскость ${lab} на глубину ${nn(f.depth)}`,`Фреза торцевая ${D} ${g} ГОСТ 26595-85`,{D:String(D),L:nn(Math.max(f.a,f.b)+D),t:fmt(Math.min(3,f.depth),2),i:Math.ceil(f.depth/3),S:"1,2",V:String(M.Vr)}));return}
+      if(f.type==="паз"){const D=emD(f.width),i=Math.ceil(f.depth/(0.5*D));tr.push(T(`Фрезеровать паз ${lab} шириной ${nn(f.width)}, глубиной ${nn(f.depth)} на длину ${nn(f.length)}`,`Фреза концевая ${D} Р6М5 ГОСТ 17025-71`,{D:String(D),L:nn(f.length+D),t:fmt(f.depth/i,2),i:i*(D<f.width-0.1?2:1),S:"0,3",V:String(Math.round(M.Vm*1.2))}));return}
+      if(f.type==="карман"){const D=emD(Math.min(0.6*Math.min(f.a,f.b),32)),i=Math.ceil(f.depth/(0.5*D));tr.push(T(`Фрезеровать карман ${lab} ${nn(f.a)}×${nn(f.b)}, глубиной ${nn(f.depth)}`,`Фреза концевая ${D} Р6М5 ГОСТ 17025-71`,{D:String(D),L:nn(f.a*f.b/(0.7*D)),t:fmt(f.depth/i,2),i,S:"0,3",V:String(Math.round(M.Vm*1.2))}));return}
+      const D=emD(Math.min(32,Math.max(8,Math.min(f.a,f.b)))),i=Math.ceil(f.depth/(0.5*D));
+      tr.push(T(`Фрезеровать уступ ${lab} ${nn(f.a)}×${nn(f.b)}, выдерживая глубину ${nn(f.depth)}`,`Фреза концевая ${D} Р6М5 ГОСТ 17025-71`,{D:String(D),L:nn(Math.max(f.a,f.b)*Math.max(1,Math.ceil(Math.min(f.a,f.b)/(0.8*D)))),t:fmt(f.depth/i,2),i,S:"0,3",V:String(Math.round(M.Vm*1.2))}))});
+    add({name:"Вертикально-фрезерная",eq:serial?"Многоцелевой станок с ЧПУ ИР500ПМФ4":"Вертикально-фрезерный станок 6Р12",prof:"18632",r:"3",tpz:"18",soj:M.cast?"":"Эмульсия 5%",fixt:fixtM,meas:[...ms].join("\n"),tr,
+      setup:"Положение фрезы от базовых плоскостей | по эскизу | ±0,1 |\nГлубина фрезерования | по лимбу | +0,1 |"})}
+  // отверстия
+  const hs=A.holes.filter(x=>x.on),bores=hs.filter(x=>x.acc==="7"&&x.d>=20),small=hs.filter(x=>!bores.includes(x));
+  const Sd=d=>d<=6?"0,1":d<=12?"0,18":d<=20?"0,25":"0,3",dep=x=>x.through?(x.depth||ext[x.k]):x.depth;
+  if(small.length){const tr=[],ms=new Set([cal]);
+    small.forEach(x=>{const n=x.n,where=x.through?"насквозь":"на глубину "+nn(x.depth);
+      if(x.acc==="T"&&x.thread){const ti=tapInfo(x.thread),dd=ti?ti[0]:x.d,M_=x.thread;
+        tr.push(T(`Сверлить ${n>1?n+" отв.":"отверстие"} Ø${fmt(dd,1)} ${x.through?"насквозь":"на глубину "+fmt(Math.round((x.depth+0.3*dd)*2)/2,1)}`,`Сверло спиральное Ø${fmt(dd,1)} Р6М5 ГОСТ 10903-77`,{D:fmt(dd,1),L:nn(dep(x)+0.3*dd),t:fmt(dd/2,2),i:n,S:Sd(dd),V:String(M.Vd)}));
+        tr.push(T(`Зенковать фаски ${fmt(ti?ti[2]:1,2)}×45° в ${n>1?n+" отв.":"отверстии"}`,"Зенковка коническая 90° Р6М5 ГОСТ 14953-80",{D:fmt(dd+2,1),L:"1",t:"1",i:n,S:"0,1",V:"15"}));
+        tr.push(T(`Нарезать резьбу ${M_}-7H в ${n>1?n+" отв.":"отверстии"} ${x.through?"насквозь":"на глубину "+nn(x.depth)}`,`Метчик машинный ${M_} ГОСТ 3266-81`,{D:M_.replace("М",""),L:nn(dep(x)),i:n,S:fmt(ti?ti[2]:1,2),V:"6"}));
+        ms.add(`Калибр-пробка резьбовая ${M_}-7H ГОСТ 17758-72`);return}
+      if(x.acc==="7"||x.acc==="9"){const pre=x.d<=10?x.d-0.2:x.d-1.5;
+        tr.push(T(`Сверлить ${n>1?n+" отв.":"отверстие"} Ø${fmt(pre,1)} ${where}`,`Сверло спиральное Ø${fmt(pre,1)} Р6М5 ГОСТ 10903-77`,{D:fmt(pre,1),L:nn(dep(x)+0.3*pre),t:fmt(pre/2,2),i:n,S:Sd(pre),V:String(M.Vd)}));
+        if(x.d>10)tr.push(T(`Зенкеровать ${n>1?n+" отв.":"отверстие"} Ø${fmt(x.d-0.2,1)} ${where}`,`Зенкер Ø${fmt(x.d-0.2,1)} Р6М5 ГОСТ 12489-71`,{D:fmt(x.d-0.2,1),L:nn(dep(x)+3),t:fmt((x.d-0.2-pre)/2,2),i:n,S:"0,5",V:String(Math.round(M.Vd*0.9))}));
+        tr.push(T(`Развернуть ${n>1?n+" отв.":"отверстие"} Ø${nn(x.d)}H${x.acc}, Ra ${RA[x.acc==="7"?"9":"9"]}`,`Развёртка машинная Ø${nn(x.d)} H${x.acc} ГОСТ 1672-80`,{D:nn(x.d),L:nn(dep(x)+3),t:"0,1",i:n,S:"0,8",V:"8"}));
+        ms.add(`Пробка ${nn(x.d)}H${x.acc} ГОСТ 14810-69`);}
+      else{const dd=x.d;if(dd>25)tr.push(T(`Сверлить ${n>1?n+" отв.":"отверстие"} Ø20 ${where}`,"Сверло спиральное Ø20 Р6М5 ГОСТ 10903-77",{D:"20",L:nn(dep(x)+6),t:"10",i:n,S:"0,3",V:String(M.Vd)}));
+        tr.push(T(`${dd>25?"Рассверлить":"Сверлить"} ${n>1?n+" отв.":"отверстие"} Ø${nn(dd)} ${where}`,`Сверло спиральное Ø${nn(dd)} Р6М5 ГОСТ 10903-77`,{D:nn(dd),L:nn(dep(x)+0.3*dd),t:fmt(dd>25?(dd-20)/2:dd/2,2),i:n,S:Sd(dd),V:String(M.Vd)}))}
+      if(x.cb)tr.push(T(`Цековать ${n>1?n+" отв.":"отверстие"} Ø${nn(x.cb.D)} на глубину ${nn(x.cb.h)}`,`Цековка Ø${nn(x.cb.D)}/${nn(x.d)} ГОСТ 26258-87`,{D:nn(x.cb.D),L:nn(x.cb.h+1),t:fmt((x.cb.D-x.d)/2,2),i:n,S:"0,1",V:"15"}));});
+    const drill=serial?"Многоцелевой станок с ЧПУ ИР500ПМФ4":(big>500||small.some(x=>x.d>35))?"Радиально-сверлильный станок 2М55":"Вертикально-сверлильный станок 2Н135";
+    add({name:drill.includes("Радиально")?"Радиально-сверлильная":"Вертикально-сверлильная",eq:drill,prof:"18355",r:"3",tpz:"14",soj:M.cast?"":"Эмульсия 5%",fixt:A.type==="корпус"?"Кондуктор накладной":"Кондуктор накладной (плитный)",meas:[...ms].join("\n"),tr,
+      setup:small.map(x=>`Положение ${x.n>1?x.n+" отв.":"отверстия"} Ø${nn(x.d)} | по кондуктору | ±0,1 |`).join("\n")})}
+  if(o.termo&&o.termo!=="none"&&o.termo!=="stare")termo();
+  // расточка
+  if(bores.length){const tr=[],ms=new Set([cal]),hasHalf=bores.some(b=>b.half);
+    bores.forEach(x=>{const n=x.n,pre=x.d-0.6;
+      tr.push(T(`Расточить ${n>1?n+" отв.":"отверстие"} Ø${nn(x.d)}${x.half?" (в сборе с крышкой)":""} предварительно до Ø${nn(pre)}`,`Резец расточной ${g} ГОСТ 18882-73\nОправка расточная`,{D:nn(pre),L:nn(dep(x)+3),t:fmt(2,2),i:n,S:"0,3",V:String(Math.round(M.Vr*0.8))}));
+      tr.push(T(`Расточить ${n>1?n+" отв.":"отверстие"} окончательно Ø${nn(x.d)}H7, Ra 1,6`,`Резец расточной ${g} ГОСТ 18882-73\nОправка расточная`,{D:nn(x.d),L:nn(dep(x)+3),t:"0,3",i:n,S:"0,12",V:String(Math.round(M.Vf*0.8))}));
+      tr.push(T(`Снять фаски 1,5×45° в ${n>1?n+" отв.":"отверстии"} Ø${nn(x.d)}`,`Резец расточной ${g} ГОСТ 18882-73`,{D:nn(x.d),L:"2",t:"1,5",i:n,S:"0,2",V:String(M.Vf)}));
+      ms.add(`Нутромер индикаторный НИ 18-50 ГОСТ 868-82`);ms.add(`Пробка ${nn(x.d)}H7 ГОСТ 14810-69`)});
+    add({name:"Горизонтально-расточная",eq:serial?"Многоцелевой станок с ЧПУ ИР500ПМФ4":"Горизонтально-расточной станок 2620В",prof:"18809",r:"4",tpz:"30",soj:M.cast?"":"Эмульсия 5%",fixt:hasHalf?"Приспособление для расточки корпуса в сборе с крышкой":"Приспособление расточное специальное",meas:[...ms].join("\n"),tr,
+      setup:"Межосевые расстояния отверстий | по чертежу | ±0,03 |\nПараллельность осей | | 0,02 на 100 мм |\nВылет резца на оправке | по пробной расточке | |"})}
+  // шлифование плоскостей
+  const gf=A.faces6.filter(f=>f.on&&f.acc==="7");
+  if(gf.length)add({name:"Плоскошлифовальная",eq:"Плоскошлифовальный станок 3Г71",prof:"19630",r:"4",tpz:"12",soj:"Эмульсия 3%",fixt:"Плита магнитная",meas:"Микрометр МК 100-1 ГОСТ 6507-90\nПлита поверочная 1-1-400×400 ГОСТ 10905-86\nИндикатор ИЧ-10 ГОСТ 577-68",
+    tr:gf.map(f=>T(`Шлифовать плоскость ${f.no}, выдерживая размер ${nn(f.k===A.iH?H:f.k===A.iL?L:B)}, Ra 0,8`,"Круг шлифовальный 1 250×25×76 24А 40 СМ1 К ГОСТ Р 52781-2007",{D:"250",L:nn(face(f).len+30),t:"0,02",i:10,S:"15",V:"30"}))});
+  add({vid:"Слесарная",name:"Слесарная",eq:"Верстак слесарный",prof:"18466",r:"2",tpz:"3",tsht:fmt(1+0.15*hs.reduce((a,x)=>a+x.n,0),1),tv:"",fixt:"Тиски слесарные",tr:[T("Притупить острые кромки, зачистить заусенцы","Напильник 2820-0014 ГОСТ 1465-80\nШабер",{i:""})].concat(hs.some(x=>x.acc==="T")?[T("Прогнать резьбу в резьбовых отверстиях","Метчики ручные ГОСТ 3266-81",{i:""})]:[])});
+  if(A.type==="корпус")add({vid:"Слесарная",name:"Моечная",eq:"Моечная машина",prof:"",r:"2",tpz:"",tsht:"2",tv:"",tr:[T("Промыть деталь, обдуть сжатым воздухом","",{i:""})]});
+  const mK=new Set([cal,"Образцы шероховатости ГОСТ 9378-93"]);hs.forEach(x=>{if(x.acc==="T")mK.add(`Калибр-пробка резьбовая ${x.thread}-7H ГОСТ 17758-72`);if(x.acc==="7"||x.acc==="9")mK.add(`Пробка ${nn(x.d)}H${x.acc} ГОСТ 14810-69`)});
+  if(fe.length)mK.add("Штангенглубиномер ШГ-160-0,05 ГОСТ 162-90");mK.add("Плита поверочная 1-1-400×400 ГОСТ 10905-86, индикатор ИЧ-10 ГОСТ 577-68");
+  add({vid:"Контроль",name:"Контрольная",eq:"Стол ОТК",prof:"12968",r:"4",tpz:"",tsht:fmt(3+0.2*(A.faces6.length+fe.length+hs.length),1),tv:"",meas:[...mK].join("\n"),
+    tr:[T("Контролировать размеры, форму, расположение и шероховатость поверхностей согласно чертежу","",{i:""})].concat(bores.length?[T("Контролировать межосевые расстояния и параллельность осей отверстий","",{i:""})]:[])});
+  c.ops.forEach((op,i)=>op.num=String(i*5+5).padStart(3,"0"));
+  c.sk=[{title:"Эскиз детали (по 3D-модели). Номера обрабатываемых поверхностей",note:`Модель: ${A.fname}. Допуски, шероховатость и материал заданы при импорте — сверить с чертежом. Неуказанные предельные отклонения: H14, h14, ±IT14/2.`,img:drawPrism(A,{w:1600,h:760})}];
+  return c;
+}
+
+/* ---------- эскиз корпусной детали ---------- */
+function drawPrism(A,{w=1400,h=680,bg="#fff",ink="#111",acc="#1f5fa8"}={}){
+  const cv=document.createElement("canvas");cv.width=w;cv.height=h;const g=cv.getContext("2d");g.fillStyle=bg;g.fillRect(0,0,w,h);
+  const{iL,iB,iH,ext}=A,Lx=ext[iL],By=ext[iB],Hz=ext[iH];
+  const sc=Math.min((w-260)/Lx,(h-200)/(By+Hz+0.0001)*0.92),x0=(w-Lx*sc)/2,yTop=70,yFr=yTop+By*sc+60;
+  const TX=x=>x0+x*sc,TY=y=>yTop+(By-y)*sc,FY=z=>yFr+(Hz-z)*sc;
+  g.strokeStyle=ink;g.lineWidth=2.5;g.strokeRect(TX(0),TY(By),Lx*sc,By*sc);g.strokeRect(TX(0),FY(Hz),Lx*sc,Hz*sc);
+  // координаты в осях L,B,H
+  const toLBH=(k,u,v,z)=>{const p=[0,0,0];p[k]=z;const[a,b]=OTH(k);p[a]=u;p[b]=v;return[p[iL],p[iB],p[iH]]};
+  // элементы
+  g.lineWidth=1.6;
+  A.feats.forEach(f=>{const lo=toLBH(f.k,f.u0,f.v0,0),hi=toLBH(f.k,f.u1,f.v1,0);
+    if(f.k===iH){g.strokeRect(TX(Math.min(lo[0],hi[0])),TY(Math.max(lo[1],hi[1])),Math.abs(hi[0]-lo[0])*sc,Math.abs(hi[1]-lo[1])*sc);
+      const zb=f.s>0?Hz-f.depth:f.depth;g.setLineDash([8,5]);g.beginPath();g.moveTo(TX(Math.min(lo[0],hi[0])),FY(zb));g.lineTo(TX(Math.max(lo[0],hi[0])),FY(zb));g.stroke();g.setLineDash([])}});
+  A.holes.forEach(x=>x.pos.forEach(p=>{const c=toLBH(x.k,p.u,p.v,0);
+    if(x.k===iH){g.beginPath();g.arc(TX(c[0]),TY(c[1]),Math.max(2,x.d/2*sc),0,Math.PI*2);g.stroke();if(x.cb){g.beginPath();g.arc(TX(c[0]),TY(c[1]),x.cb.D/2*sc,0,Math.PI*2);g.stroke()}
+      g.setLineDash([7,4]);const z0=p.z0,z1=p.z1;g.strokeRect(TX(c[0])-x.d/2*sc,FY(z1),x.d*sc,(z1-z0)*sc);g.setLineDash([])}
+    else if(x.k===iB){g.beginPath();g.arc(TX(c[0]),FY(c[2]),Math.max(2,x.d/2*sc),0,x.half?Math.PI:Math.PI*2);g.stroke();g.setLineDash([7,4]);g.strokeRect(TX(c[0])-x.d/2*sc,TY(p.z1),x.d*sc,(p.z1-p.z0)*sc);g.setLineDash([])}
+    else{g.setLineDash([7,4]);g.strokeRect(TX(p.z0),TY(c[1])-x.d/2*sc,(p.z1-p.z0)*sc,x.d*sc);g.strokeRect(TX(p.z0),FY(c[2])-x.d/2*sc,(p.z1-p.z0)*sc,x.d*sc);g.setLineDash([])}}));
+  // номера поверхностей
+  g.font="bold 24px Arial";g.textAlign="center";g.textBaseline="middle";
+  const tag=(x,y,t,dx,dy)=>{g.strokeStyle=acc;g.fillStyle=acc;g.lineWidth=1.5;g.beginPath();g.moveTo(x,y);g.lineTo(x+dx,y+dy);g.stroke();g.beginPath();g.arc(x+dx,y+dy,16,0,Math.PI*2);g.fillStyle=bg;g.fill();g.stroke();g.fillStyle=acc;g.fillText(String(t),x+dx,y+dy+1)};
+  A.faces6.forEach(f=>{const m=Lx*sc/2;
+    if(f.k===iH)tag(TX(Lx*0.25),f.s>0?FY(Hz):FY(0),f.no,-40,f.s>0?-30:30);
+    else if(f.k===iL)tag(f.s>0?TX(Lx):TX(0),FY(Hz/2),f.no,f.s>0?44:-74,0);
+    else tag(TX(Lx*0.75),f.s>0?TY(By):TY(0),f.no,40,f.s>0?-30:30)});
+  A.feats.forEach(f=>{if(f.k!==iH)return;const lo=toLBH(f.k,(f.u0+f.u1)/2,(f.v0+f.v1)/2,0);tag(TX(lo[0]),TY(lo[1]),f.no,30,-26)});
+  // подписи отверстий
+  g.font="20px Arial";g.fillStyle=ink;g.textAlign="left";
+  A.holes.forEach(x=>{const p=x.pos[0],c=toLBH(x.k,p.u,p.v,0);const lbl=`${x.n>1?x.n+" отв. ":""}${x.thread&&x.acc==="T"?x.thread:"Ø"+nn(x.d)}${x.cb?", цек. Ø"+nn(x.cb.D):""}`;
+    if(x.k===iH)g.fillText(lbl,TX(c[0])+x.d/2*sc+6,TY(c[1])-x.d/2*sc-8);else if(x.k===iB)g.fillText(lbl,TX(c[0])+x.d/2*sc+6,FY(c[2])-x.d/2*sc-8)});
+  // габариты
+  g.strokeStyle=ink;g.lineWidth=1.2;g.font="22px Arial";g.textAlign="center";
+  const dimH=(xa,xb,y,t)=>{g.beginPath();g.moveTo(xa,y);g.lineTo(xb,y);g.stroke();[xa,xb].forEach((x,i)=>{g.beginPath();g.moveTo(x,y);g.lineTo(x+(i?-14:14),y-5);g.lineTo(x+(i?-14:14),y+5);g.closePath();g.fill()});g.fillStyle=bg;const tw=g.measureText(t).width+10;g.fillRect((xa+xb)/2-tw/2,y-14,tw,20);g.fillStyle=ink;g.fillText(t,(xa+xb)/2,y-4)};
+  const dimV=(x,ya,yb,t)=>{g.beginPath();g.moveTo(x,ya);g.lineTo(x,yb);g.stroke();g.save();g.translate(x-8,(ya+yb)/2);g.rotate(-Math.PI/2);g.fillText(t,0,0);g.restore()};
+  dimH(TX(0),TX(Lx),TY(By)-24,nn(Lx));dimV(TX(0)-30,TY(By),TY(0),nn(By));dimV(TX(0)-30,FY(Hz),FY(0),nn(Hz));
+  g.font="18px Arial";g.fillStyle="#555";g.textAlign="left";g.fillText("Вид сверху",TX(0),TY(By)-50);g.fillText("Вид спереди",TX(0),FY(Hz)-14);
+  return cv.toDataURL("image/png");
+}
+
+/* ---------- пример: плита (генерируется в браузере) ---------- */
+function samplePlateSTL(){
+  const T=[],add=(a,b,c,n)=>{const N=V3.cross(V3.sub(b,a),V3.sub(c,a));T.push(V3.dot(N,n)<0?[a,c,b]:[a,b,c])},quad=(a,b,c,d,n)=>{add(a,b,c,n);add(a,c,d,n)};
+  const L=160,B=100,H=20,N=32;
+  quad([0,0,0],[L,0,0],[L,B,0],[0,B,0],[0,0,-1]);
+  quad([0,0,H],[L,0,H],[L,88,H],[0,88,H],[0,0,1]);
+  quad([0,88,14],[L,88,14],[L,B,14],[0,B,14],[0,0,1]);
+  quad([0,88,14],[L,88,14],[L,88,H],[0,88,H],[0,1,0]);
+  quad([0,0,0],[L,0,0],[L,0,H],[0,0,H],[0,-1,0]);
+  quad([0,B,0],[L,B,0],[L,B,14],[0,B,14],[0,1,0]);
+  for(const[x,n]of[[0,-1],[L,1]]){quad([x,0,0],[x,88,0],[x,88,H],[x,0,H],[n,0,0]);quad([x,88,0],[x,B,0],[x,B,14],[x,88,14],[n,0,0])}
+  // карман 60×40 глубиной 8
+  const px0=20,px1=80,py0=25,py1=65,pz=12;
+  quad([px0,py0,pz],[px1,py0,pz],[px1,py1,pz],[px0,py1,pz],[0,0,1]);
+  quad([px0,py0,pz],[px0,py1,pz],[px0,py1,H],[px0,py0,H],[1,0,0]);quad([px1,py0,pz],[px1,py1,pz],[px1,py1,H],[px1,py0,H],[-1,0,0]);
+  quad([px0,py0,pz],[px1,py0,pz],[px1,py0,H],[px0,py0,H],[0,1,0]);quad([px0,py1,pz],[px1,py1,pz],[px1,py1,H],[px0,py1,H],[0,-1,0]);
+  const cyl=(cx,cy,r,z0,z1)=>{for(let i=0;i<N;i++){const a=i/N*2*Math.PI,b=(i+1)/N*2*Math.PI,m=(a+b)/2,P=(t,z)=>[cx+r*Math.cos(t),cy+r*Math.sin(t),z];quad(P(a,z0),P(b,z0),P(b,z1),P(a,z1),[-Math.cos(m),-Math.sin(m),0])}};
+  const ring=(cx,cy,r1,r2,z)=>{for(let i=0;i<N;i++){const a=i/N*2*Math.PI,b=(i+1)/N*2*Math.PI,P=(t,r)=>[cx+r*Math.cos(t),cy+r*Math.sin(t),z];quad(P(a,r1),P(b,r1),P(b,r2),P(a,r2),[0,0,1])}};
+  const tip=(cx,cy,r,z)=>{for(let i=0;i<N;i++){const a=i/N*2*Math.PI,b=(i+1)/N*2*Math.PI,m=(a+b)/2;add([cx+r*Math.cos(a),cy+r*Math.sin(a),z],[cx+r*Math.cos(b),cy+r*Math.sin(b),z],[cx,cy,z-0.6*r],[-Math.cos(m),-Math.sin(m),0.6])}};
+  for(const[x,y]of[[12,12],[148,12],[12,76],[148,76]]){cyl(x,y,4.5,0,11);ring(x,y,4.5,7.5,11);cyl(x,y,7.5,11,H)}
+  for(const y of[35,55]){cyl(120,y,3.4,4,H);tip(120,y,3.4,4)}
+  const buf=new ArrayBuffer(84+T.length*50),dv=new DataView(buf);dv.setUint32(80,T.length,true);
+  T.forEach((t,i)=>{const o=84+i*50;const n=V3.norm(V3.cross(V3.sub(t[1],t[0]),V3.sub(t[2],t[0])));n.forEach((v,k)=>dv.setFloat32(o+k*4,v,true));t.forEach((p,a)=>p.forEach((v,k)=>dv.setFloat32(o+12+a*12+k*4,v,true)))});
+  return buf;
+}
 
 load();
 /* карты из версии 1 без примера новых документов: дополняем пример группой, эскизом, комплектом и инструкцией */
