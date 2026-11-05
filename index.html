@@ -134,7 +134,7 @@ table.it select,table.it input{border:1px solid var(--line);background:var(--fie
 <body>
 <header class="top">
   <div class="top-in">
-    <div class="brand">Техкарты ЕСТД <small>v3.2</small></div>
+    <div class="brand">Техкарты ЕСТД <small>v3.3 · FDM</small></div>
     <select class="sel" id="cardSel" aria-label="Выбор детали"></select>
     <button class="btn" id="bNew">Новая</button>
     <button class="btn" id="bDup">Копия</button>
@@ -178,12 +178,15 @@ table.it select,table.it input{border:1px solid var(--line);background:var(--fie
 <input type="file" id="imgIn" accept="image/*" hidden>
 
 <datalist id="dlOps">
+  <option value="3D-печать FDM"><option value="Подготовка модели к печати"><option value="Постобработка FDM">
   <option value="Заготовительная"><option value="Отрезная"><option value="Фрезерно-центровальная"><option value="Токарная"><option value="Токарная с ЧПУ"><option value="Токарно-винторезная"><option value="Фрезерная"><option value="Вертикально-фрезерная"><option value="Горизонтально-фрезерная"><option value="Сверлильная"><option value="Зубофрезерная"><option value="Протяжная"><option value="Круглошлифовальная"><option value="Плоскошлифовальная"><option value="Термическая"><option value="Слесарная"><option value="Моечная"><option value="Сборочная"><option value="Контрольная">
 </datalist>
 <datalist id="dlEq">
+  <option value="Creality Ender-3 V3"><option value="Prusa i3 MK3S+"><option value="Bambu Lab X1C"><option value="Raise3D Pro3">
   <option value="Токарно-винторезный станок 16К20"><option value="Токарный станок с ЧПУ 16К20Ф3"><option value="Фрезерно-центровальный станок МР-71М"><option value="Вертикально-фрезерный станок 6Р12"><option value="Горизонтально-фрезерный станок 6Р82"><option value="Вертикально-сверлильный станок 2Н135"><option value="Радиально-сверлильный станок 2М55"><option value="Зубофрезерный станок 5К301П"><option value="Круглошлифовальный станок 3М151"><option value="Плоскошлифовальный станок 3Г71"><option value="Ленточнопильный станок"><option value="Верстак слесарный"><option value="Пресс гидравлический"><option value="Стол ОТК">
 </datalist>
 <datalist id="dlVid">
+  <option value="Аддитивная (FDM)">
   <option value="Механическая обработка"><option value="Заготовительная"><option value="Термическая обработка"><option value="Слесарная"><option value="Сборка"><option value="Контроль">
 </datalist>
 
@@ -200,7 +203,7 @@ const pipes=s=>lines(s).map(l=>l.split("|").map(x=>x.trim()));
 
 /* ---------- данные ---------- */
 const blankTr=()=>({text:"",tools:"",pi:"",D:"",L:"",t:"",i:"1",S:"",n:"",V:""});
-const blankOp=()=>({num:"",vid:"Механическая обработка",cex:"",uch:"",rm:"",code:"",name:"",doc:"",eq:"",sm:"",prof:"",r:"",ut:"",kr:"1",koid:"1",en:"",op:"",ksht:"",tpz:"",tsht:"",tv:"",soj:"",fixt:"",meas:"",setup:"",img:"",imgCap:"",var:"",tr:[blankTr()],open:true});
+const blankOp=()=>({num:"",vid:"Механическая обработка",cex:"",uch:"",rm:"",code:"",name:"",doc:"",eq:"",sm:"",prof:"",r:"",ut:"",kr:"1",koid:"1",en:"",op:"",ksht:"",tpz:"",tsht:"",tv:"",soj:"",fixt:"",meas:"",setup:"",img:"",imgCap:"",var:"",tr:[blankTr()],open:true,fdmLayer:"",fdmNozzle:"",fdmInfill:"",fdmWall:"",fdmTopBot:"",fdmOrient:"",fdmSupp:"",fdmTN:"",fdmTB:"",fdmCham:"",fdmSpeed:"",fdmTime:"",fdmMass:""});
 const TPL={
   group:()=>({oboz:"",name:"",mat:"",md:"",prog:""}),
   sk:()=>({title:"",note:"",img:""}),
@@ -408,7 +411,23 @@ function opBlock(op,oi){
      <div class="sub">Наладка и эскиз (КН, КЭ)</div>
      ${imgField(k+".img",op.img,"Схема наладки / операционный эскиз")}
      ${F(k+".imgCap","Подпись к эскизу",op.imgCap)}
-     ${F(k+".setup","Наладочные параметры: параметр | значение | допуск | примечание",op.setup,{ta:1,rows:3,ph:"Вылет резца | 30 мм | ±2 |"})}
+     ${op.vid==="Аддитивная (FDM)"?`<div class="sub">Параметры FDM-печати</div>
+<div class="grid">
+  ${F(k+".fdmLayer","Толщина слоя, мм",op.fdmLayer,{num:1,ph:"0,2"})}
+  ${F(k+".fdmNozzle","Сопло, мм",op.fdmNozzle,{num:1,ph:"0,4"})}
+  ${F(k+".fdmWall","Стенки, шт",op.fdmWall,{num:1,ph:"3"})}
+  ${F(k+".fdmTopBot","Верх/низ, слоёв",op.fdmTopBot,{num:1,ph:"4"})}
+  ${F(k+".fdmInfill","Заполнение, %",op.fdmInfill,{num:1,ph:"20"})}
+  ${F(k+".fdmSpeed","Скорость, мм/с",op.fdmSpeed,{num:1,ph:"50"})}
+  ${F(k+".fdmTN","T сопла, °C",op.fdmTN,{num:1})}
+  ${F(k+".fdmTB","T стола, °C",op.fdmTB,{num:1})}
+  ${F(k+".fdmCham","T камеры, °C",op.fdmCham,{num:1})}
+  ${F(k+".fdmOrient","Ориентация",op.fdmOrient,{w:"w2",ph:"Z вверх, отверстия в плоскости XY"})}
+  ${F(k+".fdmSupp","Поддержки",op.fdmSupp,{w:"w2",ph:"нет / дерево / линейные"})}
+  ${F(k+".fdmTime","Время печати, ч:мин",op.fdmTime,{w:"w2",ph:"3:45"})}
+  ${F(k+".fdmMass","Масса филамента, г",op.fdmMass,{num:1})}
+</div>`:""}
+${F(k+".setup","Наладочные параметры: параметр | значение | допуск | примечание",op.setup,{ta:1,rows:3,ph:"Вылет резца | 30 мм | ±2 |"})}
      <div class="sub">Группа (КТТП, КТО)</div>
      ${F(k+".var","Переменные данные по деталям группы: D или B | L | Тшт — по строке на деталь, в порядке раздела «Группа»",op.var,{ta:1,rows:3,ph:"46,5 | 132 | 6,2"})}
    </div>`:""}
@@ -479,6 +498,13 @@ function opRows(op,mode){
     if([t.D,t.L,t.t,t.S,t.V,t.pi].some(v=>String(v||"").trim()))push("Р","R",[t.pi,t.D,t.L,t.t,t.i,t.S,n!=null?String(n):"",t.V]);
   });
   lines(op.meas).forEach(m=>wrapText(m,150).forEach(l=>push("Т","X",[l])));
+  if(op.vid==="Аддитивная (FDM)"){
+    push("О","X",[`Слой ${op.fdmLayer||"—"} мм · сопло ${op.fdmNozzle||"—"} мм · заполнение ${op.fdmInfill||"—"} % · стенки ${op.fdmWall||"—"} · верх/низ ${op.fdmTopBot||"—"} слоёв`]);
+    push("О","X",[`T сопла ${op.fdmTN||"—"} °C · T стола ${op.fdmTB||"—"} °C · T камеры ${op.fdmCham||"—"} °C`]);
+    push("О","X",[`Скорость ${op.fdmSpeed||"—"} мм/с · поддержки: ${op.fdmSupp||"нет"} · ориентация: ${op.fdmOrient||"—"}`]);
+    if(op.fdmTime||op.fdmMass)push("О","X",[`Время печати ${op.fdmTime||"—"} · масса ${op.fdmMass||"—"} г`]);
+    return R;
+  }
   return R;
 }
 
@@ -1120,6 +1146,16 @@ function caliper(x){return x<=125?"Штангенциркуль ШЦ-I-125-0,1 �
 function micro(D){const hi=Math.max(25,Math.ceil(D/25)*25);return`Микрометр МК ${hi}-1 ГОСТ 6507-90`}
 function centerSize(D){return D<12?"А2":D<25?"А2,5":D<40?"А3,15":D<80?"А4":"А5"}
 
+
+/* ================= FDM: справочники ================= */
+const FDM_MAT={
+ "PLA ГОСТ Р 58576-2019":{ro:1.24,tn:215,tb:60,note:"Печать 200–220 °C, стол 50–60 °C, охлаждение 100 %"},
+ "PETG":{ro:1.27,tn:240,tb:80,note:"Печать 230–250 °C, стол 75–85 °C, скорость до 60 мм/с"},
+ "ABS низкой усадки":{ro:1.04,tn:250,tb:100,note:"Печать 240–260 °C, стол 100–110 °C, камера ≥ 40 °C"},
+ "TPU 95A":{ro:1.21,tn:230,tb:50,note:"Скорость 20–30 мм/с, прямое сопло, без ретракта"},
+ "Нейлон PA6/PA12":{ro:1.14,tn:265,tb:90,note:"Сушка филамента 80 °C / 4 ч, печать 255–275 °C"}
+};
+const FDM_EQ=["Creality Ender-3 V3","Prusa i3 MK3S+","Prusa XL (5 голов)","Bambu Lab X1C","Anycubic Kobra 2 Pro","Raise3D Pro3"];
 /* ---------- генерация техпроцесса ---------- */
 function genProcess(A,o){
   const M=MAT[o.mat]||MAT["Сталь 45 ГОСТ 1050-2013"],g=M.g;
@@ -1265,6 +1301,69 @@ function genProcess(A,o){
   c.h.name=o.name;return c;
 }
 
+
+/* ================= FDM: генерация техпроцесса ================= */
+function genFDM(A,o){
+  const c=blankCard(),h=c.h;
+  const M=FDM_MAT[o.fdmMat]||FDM_MAT["PLA ГОСТ Р 58576-2019"];
+  const V=A.vol?A.vol/1000:Math.max(1,0.001*(A.L*A.B*A.H||A.Dmax*A.Dmax*A.L))*0.2;
+  const infill=parseFloat(o.fdmInfill||"20")/100;
+  const mf=V*M.ro*(0.35+0.65*infill);
+  const nozz=o.fdmNozzle||"0,4", layer=o.fdmLayer||"0,2", speed=o.fdmSpeed||"50";
+  const Hmm=(A.H||A.Dmax||20);
+  const tH=Hmm/parseFloat(layer||"0,2")*0.04;
+  const time=o.fdmTime||(Math.floor(tH)+":"+String(Math.round((tH%1)*60)).padStart(2,"0"));
+  Object.assign(h,{oboz:o.oboz,name:o.name,org:o.org||"",mat:o.fdmMat,ev:"г",
+    md:fmt(mf,1),mz:fmt(mf*1.05,1),nrash:fmt(mf*1.05,1),
+    zagProf:"Филамент "+o.fdmMat+", "+V.toFixed(1)+" см³",
+    tv:"—",razr:o.razr||"",date:new Date().toLocaleDateString("ru-RU")});
+  const T=(text,tools,m={})=>Object.assign(blankTr(),{text,tools:tools||""},m);
+  const add=op=>{const x=Object.assign(blankOp(),{cex:"01",uch:"1",rm:"1",kr:"1",koid:"1",en:"1",op:"1",ksht:"1",open:false},op);c.ops.push(x);return x};
+  add({vid:"Аддитивная (FDM)",name:"Подготовка модели к печати",eq:"PrusaSlicer / Cura",prof:"",r:"3",tpz:"10",tsht:"15",tv:"5",
+    fixt:"—",meas:"Штангенциркуль ШЦ-I-125-0,1 ГОСТ 166-89",
+    tr:[T("Импортировать модель STL/STEP, проверить герметичность сетки (Manifold)","Slicer: настройка «Починка модели»"),
+        T("Разместить модель на столе, ориентация: "+(o.fdmOrient||"Z вверх"),"—"),
+        T("Задать параметры: слой "+layer+" мм, сопло "+nozz+" мм, стенки "+(o.fdmWall||"3")+", верх/низ "+(o.fdmTopBot||"4")+", заполнение "+(o.fdmInfill||"20")+" %","—"),
+        T("Температуры: сопло "+(o.fdmTN||M.tn)+" °C, стол "+(o.fdmTB||M.tb)+" °C"+(M.note?" ("+M.note+")":""),"—")],
+    fdmLayer:layer,fdmNozzle:nozz,fdmInfill:o.fdmInfill||"20",fdmWall:o.fdmWall||"3",fdmTopBot:o.fdmTopBot||"4",
+    fdmSpeed:speed,fdmTN:String(o.fdmTN||M.tn),fdmTB:String(o.fdmTB||M.tb),
+    fdmSupp:o.fdmSupp||"нет",fdmOrient:o.fdmOrient||"Z вверх",
+    setup:"Толщина первого слоя | "+fmt(parseFloat(layer||"0,2")*0.8,2)+" | ±0,02 |
+Калибровка стола | по листу бумаги | |
+Калибровка экструзии (E-steps) | по таблице принтера | ±2 % |"});
+  add({vid:"Аддитивная (FDM)",name:"3D-печать FDM",eq:o.fdmEq||"Prusa i3 MK3S+",prof:"16045",r:"3",tpz:"20",
+    tsht:time,tv:"5",soj:"—",
+    fixt:o.fdmFixt||"Стол с адгезивом (клей-карандаш / PEI-пластина)",
+    meas:"Штангенциркуль ШЦ-I-125-0,1 ГОСТ 166-89
+Микрометр МК 25-1 ГОСТ 6507-90",
+    tr:[T("Загрузить филамент "+o.fdmMat+", прогреть сопло до "+(o.fdmTN||M.tn)+" °C и стол до "+(o.fdmTB||M.tb)+" °C","—"),
+        T("Запустить печать G-code. Контролировать первый слой (адгезия, раздавливание)","—"),
+        T("По завершении охладить, снять деталь со стола","—")],
+    fdmLayer:layer,fdmNozzle:nozz,fdmInfill:o.fdmInfill||"20",fdmSpeed:speed,
+    fdmTN:String(o.fdmTN||M.tn),fdmTB:String(o.fdmTB||M.tb),fdmTime:time,fdmMass:fmt(mf,1),
+    setup:"Диаметр сопла | "+nozz+" | ±0,02 |
+Толщина слоя | "+layer+" | ±0,01 |
+Скорость печати | "+speed+" | ±5 | мм/с"});
+  add({vid:"Слесарная",name:"Постобработка FDM",eq:"Верстак слесарный",prof:"18466",r:"2",tpz:"3",tsht:"10",tv:"2",
+    fixt:"Тиски слесарные с накладками",
+    meas:"Штангенциркуль ШЦ-I-125-0,1 ГОСТ 166-89
+Образцы шероховатости ГОСТ 9378-93",
+    tr:[T("Удалить поддержки и заусенцы, снять фаски с кромок","Кусачки боковые, надфиль, скальпель"),
+        T("Зачистить швы и следы от поддержек наждачной бумагой P240→P600","Шкурка шлифовальная ГОСТ 13344-79"),
+        T("Обезжирить поверхность спиртом","Салфетки, изопропанол")],
+    setup:"—"});
+  add({vid:"Контроль",name:"Контрольная",eq:"Стол ОТК",prof:"12968",r:"4",tpz:"",tsht:"5",
+    meas:"Штангенциркуль ШЦ-I-125-0,1 ГОСТ 166-89
+Микрометр МК 25-1 ГОСТ 6507-90
+Образцы шероховатости ГОСТ 9378-93
+Весы лабораторные ГОСТ 24104-2001",
+    tr:[T("Проверить размеры, толщину стенок и слоя, отсутствие расслоений и непропечаток","—"),
+        T("Масса детали — не более "+fmt(mf*1.1,1)+" г","—"),
+        T("Шероховатость поверхности Ra ≤ 12,5 (по слою)","—")],
+    setup:"—"});
+  c.ops.forEach((op,i)=>op.num=String(i*5+5).padStart(3,"0"));
+  return c;
+}
 /* ---------- эскиз ---------- */
 function drawPart(A,{w=1400,h=600,bg="#fff",ink="#111",acc="#1f5fa8",labels=true}={}){
   const cv=document.createElement("canvas");cv.width=w;cv.height=h;const g=cv.getContext("2d");
@@ -1362,6 +1461,8 @@ function setImp(A,fname){
   const m=/^(\S*[.\d]\S*)\s+(.+)$/.exec(A.oboz||base);
   IMPO.oboz=A.oboz&&A.oboz!==A.name?A.oboz:(m?m[1]:"");IMPO.name=A.name&&A.name!==A.oboz?A.name:(m?m[2]:base);
   if(!IMPO.name)IMPO.name=base;
+  if(!IMPO.fdmMat)IMPO.fdmMat="PLA ГОСТ Р 58576-2019";
+  if(!IMPO.fdmEq)IMPO.fdmEq="Prusa i3 MK3S+";
   if(A.kind==="prism"){if(A.type==="корпус"){IMPO.mat="Чугун СЧ20 ГОСТ 1412-85";IMPO.termo="stare"}else{IMPO.mat="Сталь 45 ГОСТ 1050-2013";IMPO.termo="none"}}
   else{if(MAT[IMPO.mat]&&MAT[IMPO.mat].cast&&!/СЧ/.test(IMPO.mat))IMPO.mat="Сталь 45 ГОСТ 1050-2013";if(IMPO.termo==="stare")IMPO.termo="ul"}
 }
@@ -1411,7 +1512,7 @@ function prismBody(A){
 function renderImport(ed){
   let html=`<p class="intro">Загрузите 3D-модель детали в формате <b>STEP</b> (точнее) или <b>STL</b>. В КОМПАС: «Файл → Сохранить как» → STEP. Подходят <b>тела вращения</b> (валы, втулки, шестерни, шкивы, круглые крышки) и <b>корпусные детали</b> (плиты, планки, крышки, корпуса). Приложение найдёт поверхности, пазы и отверстия, подберёт заготовку и составит техпроцесс со всеми картами.</p>
   <div class="drop" id="drop"><b>Перетащите файл сюда</b> или <label class="btn primary" for="m3dIn" style="margin:0">Выбрать файл…</label>
-   <input type="file" id="m3dIn" accept=".step,.stp,.stl" hidden> <button class="btn" data-ia="sample">Пример: вал</button> <button class="btn" data-ia="sampleP">Пример: плита</button></div>`;
+   <input type="file" id="m3dIn" accept=".step,.stp,.stl" hidden> <button class="btn" data-ia="sample">Пример: вал</button> <button class="btn" data-ia="sampleP">Пример: плита</button> <button class="btn" data-ia="sampleFDM">Пример: FDM</button></div>`;
   if(IMPBUSY)html+=`<p class="hint">Читаю модель…</p>`;
   if(IMPERR)html+=`<p class="err">${esc(IMPERR)}</p>`;
   if(IMP){const P=IMP.kind==="prism";
@@ -1423,7 +1524,25 @@ function renderImport(ed){
       <label class="f w2">Термообработка<select data-io="termo">${opt([["none","без термообработки"],["stare","старение / снятие напряжений"],["ul","улучшение"],["tvch","закалка ТВЧ"],["cem","цементация и закалка"]],IMPO.termo)}</select></label>
       <label class="f w2">Производство<select data-io="prod">${opt([["ed","единичное / мелкосерийное"],["ser","серийное (станки с ЧПУ)"]],IMPO.prod)}</select></label>
     </div></fieldset>
-    <div class="row-actions"><button class="btn primary" data-ia="gen">Создать техпроцесс</button><span class="hint">Создаст новую карту, текущие не изменятся.</span></div>`;
+    <fieldset><legend>FDM-печать</legend><div class="grid">
+  <label class="f w2">Материал (FDM)<select data-io="fdmMat">
+    ${Object.keys(FDM_MAT).map(k=>`<option value="${esc(k)}"${k===(IMPO.fdmMat||"PLA ГОСТ Р 58576-2019")?" selected":""}>${esc(k)}</option>`).join("")}
+  </select></label>
+  <label class="f">Слой, мм<input data-io="fdmLayer" value="${esc(IMPO.fdmLayer||"0,2")}"></label>
+  <label class="f">Сопло, мм<input data-io="fdmNozzle" value="${esc(IMPO.fdmNozzle||"0,4")}"></label>
+  <label class="f">Заполнение, %<input data-io="fdmInfill" value="${esc(IMPO.fdmInfill||"20")}"></label>
+  <label class="f">Стенки<input data-io="fdmWall" value="${esc(IMPO.fdmWall||"3")}"></label>
+  <label class="f">Верх/низ<input data-io="fdmTopBot" value="${esc(IMPO.fdmTopBot||"4")}"></label>
+  <label class="f">Скорость, мм/с<input data-io="fdmSpeed" value="${esc(IMPO.fdmSpeed||"50")}"></label>
+  <label class="f w2">Принтер<select data-io="fdmEq">
+    ${FDM_EQ.map(e=>`<option value="${esc(e)}"${e===(IMPO.fdmEq||"Prusa i3 MK3S+")?" selected":""}>${esc(e)}</option>`).join("")}
+  </select></label>
+  <label class="f w2">Поддержки<select data-io="fdmSupp">
+    ${["нет","дерево","линейные","только от стола"].map(v=>`<option${v===(IMPO.fdmSupp||"дерево")?" selected":""}>${v}</option>`).join("")}
+  </select></label>
+  <label class="f wall">Ориентация<input data-io="fdmOrient" value="${esc(IMPO.fdmOrient||"Z вверх, отверстия в плоскости XY")}"></label>
+</div></fieldset>
+<div class="row-actions"><button class="btn primary" data-ia="gen">Создать техпроцесс</button> <button class="btn" data-ia="genFDM">Создать FDM-техпроцесс</button><span class="hint">Создаст новую карту, текущие не изменятся.</span></div>`;
   }
   ed.innerHTML=html;
   const inp=$("#m3dIn");inp.onchange=e=>{const f=e.target.files[0];e.target.value="";if(f)importFile(f)};
@@ -1434,6 +1553,24 @@ function impClick(e){
   const b=e.target.closest("[data-ia]");if(!b)return false;
   if(b.dataset.ia==="sample"){try{const A=analyzeSTL(sampleSTL(),"Вал_редуктора.stl");setImp(A,"КП.ДМ.03.01.002 Вал выходной.stl");IMPERR=""}catch(err){IMPERR=err.message}renderEditor()}
   if(b.dataset.ia==="sampleP"){try{const A=analyzeSTL(samplePlateSTL(),"Плита.stl");setImp(A,"КП.ДМ.05.00.011 Плита.stl");IMPERR=""}catch(err){IMPERR=err.message}renderEditor()}
+  if(b.dataset.ia==="sampleFDM"&&IMP){
+    try{
+      const c=genFDM(IMP,{fdmMat:"PLA ГОСТ Р 58576-2019",fdmLayer:"0,2",fdmNozzle:"0,4",
+        fdmInfill:"20",fdmWall:"3",fdmTopBot:"4",fdmSpeed:"50",fdmTN:"215",fdmTB:"60",
+        fdmSupp:"дерево",fdmOrient:"Z вверх, отверстия в плоскости XY",fdmEq:"Prusa i3 MK3S+",
+        oboz:IMPO.oboz||"КП.ДМ.06.01.001",name:IMPO.name||"Кронштейн (FDM)",org:card().h.org,razr:card().h.razr});
+      S.cards.push(c);S.cur=c.id;S.tab="ops";S.kind="mok";save();renderAll();
+      toast("FDM-техпроцесс: "+c.ops.length+" операций");
+    }catch(err){toast("FDM: "+err.message)}
+  }
+  if(b.dataset.ia==="genFDM"&&IMP){
+    try{
+      const o={...IMPO,org:card().h.org,razr:card().h.razr};
+      const c=genFDM(IMP,o);
+      S.cards.push(c);S.cur=c.id;S.tab="ops";S.kind="mok";save();renderAll();
+      toast("FDM-техпроцесс создан: "+c.ops.length+" операций");
+    }catch(err){toast("FDM: "+err.message)}
+  }
   if(b.dataset.ia==="gen"&&IMP){try{const o={...IMPO,org:card().h.org,razr:card().h.razr};const c=IMP.kind==="prism"?genPrism(IMP,o):genProcess(IMP,o);S.cards.push(c);S.cur=c.id;S.tab="ops";S.kind="mok";save();renderAll();
     toast(`Техпроцесс создан: ${c.ops.length} операций. Проверьте точность, режимы и нормы`)}catch(err){toast("Не удалось составить техпроцесс: "+err.message)}}
   return true;
