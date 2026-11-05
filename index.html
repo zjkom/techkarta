@@ -1794,62 +1794,7 @@ load();
 S.cards.forEach(c=>{if(c.h.oboz==="КП.ДМ.02.01.003"&&!c.group.length&&!c.sk.length&&!c.kit.length&&!c.ti.length){const s=sample();["group","sk","kit","ti"].forEach(k=>c[k]=s[k]);["grpName","grpOboz","kitName","kitOboz","tiName"].forEach(k=>c.h[k]=s.h[k]);c.ops.forEach((o,i)=>{const so=s.ops.find(x=>x.num===o.num);if(so){["vid","meas","setup","var"].forEach(f=>{if(!o[f]||(f==="vid"&&o[f]==="Механическая обработка"))o[f]=so[f]})}});save()}});
 renderAll();
 })();
- /* ================= ВСТРОЕННЫЙ FDM-МОДУЛЬ ================= */
-(function(){
-  const timer=setInterval(()=>{
-    if(typeof blankCard==="function"&&typeof genProcess==="function"&&document.getElementById("editor")){
-      clearInterval(timer);
-      
-      const FDM_MAT={"PLA ГОСТ Р 58576-2019":{ro:1.24,tn:215,tb:60},"PETG":{ro:1.27,tn:240,tb:80},"ABS":{ro:1.04,tn:250,tb:100},"TPU":{ro:1.21,tn:230,tb:50},"Нейлон":{ro:1.14,tn:265,tb:90}};
-      const FDM_EQ=["Creality Ender-3 V3","Prusa i3 MK3S+","Bambu Lab X1C","Anycubic Kobra 2 Pro"];
-      
-      // 1. Функция генерации FDM
-      window.genFDM=function(A,o){
-        const c=blankCard(),h=c.h;
-        const M=FDM_MAT[o.fdmMat]||FDM_MAT["PLA ГОСТ Р 58576-2019"];
-        const V=A.vol?A.vol/1000:10;
-        const mf=V*M.ro*(0.35+0.65*(parseFloat(o.fdmInfill||"20")/100));
-        Object.assign(h,{oboz:o.oboz||"FDM-001",name:o.name||"Деталь FDM",mat:o.fdmMat,ev:"г",md:mf.toFixed(1),mz:(mf*1.05).toFixed(1),zagProf:"Филамент "+o.fdmMat,tv:"—",date:new Date().toLocaleDateString("ru-RU")});
-        const T=(t,to)=>Object.assign(blankTr(),{text:t,tools:to||""});
-        const add=op=>{const x=Object.assign(blankOp(),op);c.ops.push(x);return x};
-        add({vid:"Аддитивная (FDM)",name:"Подготовка",eq:"PrusaSlicer",r:"3",tpz:"10",tsht:"15",tr:[T("Импорт STL","—")]});
-        add({vid:"Аддитивная (FDM)",name:"3D-печать FDM",eq:o.fdmEq||"Prusa i3",r:"3",tpz:"20",tsht:"120",fdmLayer:"0,2",fdmNozzle:"0,4",fdmInfill:"20",fdmTN:String(M.tn),fdmTB:String(M.tb),tr:[T("Печать G-code","—")]});
-        add({vid:"Слесарная",name:"Постобработка",eq:"Верстак",r:"2",tpz:"3",tsht:"10",tr:[T("Удалить поддержки","Кусачки")]});
-        add({vid:"Контроль",name:"Контрольная",eq:"ОТК",r:"4",tpz:"",tsht:"5",tr:[T("Проверить размеры","—")]});
-        c.ops.forEach((op,i)=>op.num=String(i*5+5).padStart(3,"0"));
-        return c;
-      };
-
-      // 2. Перехват кнопок (без вмешательства в ваш код)
-      document.body.addEventListener("click",function(e){
-        const b=e.target.closest("[data-ia]");
-        if(b&&b.dataset.ia==="genFDM"&&IMP){
-          e.preventDefault();e.stopPropagation();
-          try{
-            const c=genFDM(IMP,IMPO||{});
-            // Автоматически нажимаем "Новая" и подменяем данные
-            document.getElementById("bNew").click();
-            const cur=S.cards.find(x=>x.id===S.cur);
-            Object.assign(cur,c);
-            save();renderAll();
-          }catch(err){alert(err.message)}
-        }
-        // Добавляем кнопку в панель импорта
-        if(b&&b.dataset.ia==="gen"){
-          setTimeout(()=>{
-            if(!document.querySelector('[data-ia="genFDM"]')){
-              const btn=document.createElement("button");
-              btn.className="btn";btn.dataset.ia="genFDM";btn.textContent="Создать FDM-техпроцесс";
-              b.parentNode.appendChild(btn);
-            }
-          },100);
-        }
-      });
-      
-      console.log("FDM встроен!");
-    }
-  },500);
-})();
 </script>
+  
 </body>
 </html>
